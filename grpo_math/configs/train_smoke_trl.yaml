@@ -1,0 +1,59 @@
+seed: 1234
+
+# Fast end-to-end smoke test config for the TRL GRPOTrainer path.
+# Intended to validate that training + checkpointing + eval run without OOM.
+
+model:
+  # Tiny model to keep the smoke test fast and low-memory.
+  # NOTE: TRL expects `config.architectures` to be set; this model has it.
+  name_or_path: "sshleifer/tiny-gpt2"
+  torch_dtype: "float32"
+  use_flash_attn: false
+
+data:
+  dataset_name: "gsm8k"
+  dataset_config: "main"
+  split_train: "train"
+  split_eval: "test"
+  max_train_samples: 32
+  max_eval_samples: 32
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    You must solve step by step, then output the final answer on its own line as:
+    FINAL_ANSWER: <number>
+
+rollout:
+  k: 2
+  temperature: 0.7
+  top_p: 0.95
+  max_new_tokens: 64
+
+train:
+  output_dir: "outputs/trl_smoke_trl"
+  steps: 2
+  prompts_per_step: 4
+  grad_accum_steps: 1
+
+  lr: 1.0e-5
+  warmup_steps: 0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  kl_beta: 0.01
+
+  gradient_checkpointing: false
+  log_every: 1
+  eval_every: 0
+  save_every: 1
+
+  wandb:
+    enabled: false
+    project: "grpo-math"
+    run_name: "trl-smoke"
+
+  debug_rollouts:
+    enabled: false
+

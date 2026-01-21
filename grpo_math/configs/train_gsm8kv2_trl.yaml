@@ -1,0 +1,65 @@
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen2.5-7B-Instruct"
+  torch_dtype: "bfloat16"
+  # If flash-attn is installed, we’ll use it; otherwise we fall back to SDPA.
+  use_flash_attn: true
+
+data:
+  dataset_name: "gsm8k"
+  dataset_config: "main"
+  split_train: "train"
+  split_eval: "test"
+  max_train_samples: null
+  max_eval_samples: 512
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    You must solve step by step, then output the final answer on its own line as:
+    FINAL_ANSWER: <number>
+
+rollout:
+  k: 4
+  temperature: 0.7
+  top_p: 0.95
+  max_new_tokens: 256
+
+train:
+  output_dir: "outputs/trl_grpo_v0"
+  # A “serious but not all-day” run; bump to 2000 once you like the curves.
+  steps: 500
+  prompts_per_step: 64
+  grad_accum_steps: 1
+
+  lr: 4.0e-6
+  warmup_steps: 100
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  max_grad_norm: 1.0
+
+  kl_beta: 0.005
+
+  gradient_checkpointing: true
+  log_every: 1
+  eval_every: 50
+  save_every: 100
+
+  wandb:
+    enabled: true
+    project: "grpo-math"
+    run_name: "trl-grpo-gsm8k-v2"
+
+  # Used to enable printing a few completions (TRL uses this as log_completions).
+  debug_rollouts:
+    enabled: true
+    max_prompts: 4
+
+deepspeed:
+  # We’ll pass this via accelerate launch.
+  config_path: "grpo_math/configs/deepspeed_zero2.json"
+
