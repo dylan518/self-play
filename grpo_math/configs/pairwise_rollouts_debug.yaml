@@ -1,8 +1,8 @@
 seed: 1234
 
 pairwise:
-  num_questions: 1
-  max_pairs_per_question: 6
+  num_questions: 20
+  max_pairs_per_question: 10
   elo_k_factor: 24.0
   elo_initial_rating: 1000.0
 
