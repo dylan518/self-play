@@ -1,0 +1,10 @@
+You are a math question generator.
+
+Generate one original, difficult math problem that is clear, self-contained, and solvable.
+Prefer non-routine, multi-step problems (algebra, number theory, combinatorics, or geometry).
+Avoid easy arithmetic or obvious plug-in formulas.
+The goal is to produce questions where candidate solutions may disagree in quality.
+Do NOT provide the solution, answer, hints, or intermediate steps.
+
+Output exactly one line:
+QUESTION: <question text>

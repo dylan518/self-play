@@ -1,0 +1,64 @@
+seed: 1234
+
+pairwise:
+  num_questions: 5
+  max_pairs_per_question: 45
+  elo_k_factor: 24.0
+  elo_initial_rating: 1000.0
+
+generator:
+  model_name_or_path: "Qwen/Qwen3-0.6B"
+  torch_dtype: "bfloat16"
+  use_chat_template: true
+  enable_thinking: false
+  prompt_template_path: "grpo_math/prompts/question_generator_prompt.txt"
+  temperature: 1.0
+  top_p: 0.95
+  max_new_tokens: 128
+  batch_size: 8
+  max_retries_per_question: 3
+
+solver:
+  model_name_or_path: "Qwen/Qwen3-0.6B"
+  torch_dtype: "bfloat16"
+  use_chat_template: true
+  enable_thinking: false
+  num_solutions_per_question: 10
+  sampling_groups:
+    - count: 3
+      temperature: 0.5
+      top_p: 0.8
+    - count: 4
+      temperature: 0.9
+      top_p: 0.9
+    - count: 3
+      temperature: 1.2
+      top_p: 0.98
+  prompt_template: |
+    Question:
+    {question}
+
+    Solve briefly in plain text (no markdown, no bullet lists).
+    Keep reasoning to at most 6 short lines.
+    The final answer must be an integer.
+    You must end with this exact line:
+    FINAL_ANSWER: <integer>
+  temperature: 0.8
+  top_p: 0.9
+  max_new_tokens: 4096
+  batch_size: 16
+
+judge:
+  model_name_or_path: "Qwen/Qwen3-0.6B"
+  torch_dtype: "bfloat16"
+  use_chat_template: true
+  enable_thinking: false
+  prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
+  repeats_per_pair: 5
+  temperature: 0.4
+  top_p: 0.9
+  max_new_tokens: 64
+  batch_size: 32
+
+output:
+  jsonl_path: "outputs/pairwise_rollouts/samples.jsonl"

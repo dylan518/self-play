@@ -1,69 +1,185 @@
-# Self Play
+# Self-Improving Training Loop with Reliability-Guided Task Generation
 
-This repo contains **Math GRPO v0** scaffolding for training on **GSM8K** with a **binary reward** and **KL penalty to a frozen reference**.
+## Overview
 
-## Quickstart
+This repository describes a self-improving training system composed of three components:
 
-### Install
+- **Question Generator** `G`
+- **Solver** `S`
+- **Judge** `J`
 
-```bash
-cd /home/ubuntu/self-play
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e .
-```
+The goal of the system is to iteratively improve the solver using self-generated tasks while maintaining a stable and reliable training signal.
 
-### Train with Hugging Face TRL (recommended)
+Unlike prior approaches that optimize for difficulty alone, this framework explicitly optimizes for **evaluation reliability**.
 
-This uses TRL’s built-in `GRPOTrainer` (less custom RL code to debug).
+---
 
-```bash
-cd /home/ubuntu/self-play
-source .venv/bin/activate
+# System Components
 
-accelerate launch \
-  --num_processes 8 \
-  --mixed_precision bf16 \
-  --use_deepspeed \
-  --deepspeed_config_file grpo_math/configs/deepspeed_zero2.json \
-  -m grpo_math.trl.train_grpo_trl \
-  --config grpo_math/configs/train_gsm8kv2_trl.yaml
-```
+## 1. Question Generator
 
-### Config knobs (v0)
+At each iteration, the generator produces a batch of tasks:
 
-- **`rollout.k`**: K samples per prompt (default 16)
-- **`train.prompts_per_step`**: B prompts per step (default 64)
-- **`train.kl_beta`**: KL penalty β (default 0.02)
-- **`train.lr`**: RL-ish LR (default 2e-6)
-- **`rollout.max_new_tokens`**: generation length (default 512)
+\[
+q \sim G_\theta
+\]
 
-### Eval
+where `q` is drawn from the generator distribution.
 
-```bash
-accelerate launch \
-  --num_processes 8 \
-  -m grpo_math.eval.eval_gsm8k \
-  --config grpo_math/configs/train_gsm8kv2_trl.yaml \
-  --checkpoint outputs/trl_grpo_v0/checkpoint-200
-```
+The generator is optimized not for difficulty, but for how reliably the resulting task can be evaluated downstream.
 
-## Repo layout
+---
 
-```
-grpo_math/
-  configs/
-    deepspeed_zero3.json
-    train_gsm8kv2_trl.yaml
-  data/
-    gsm8k.py
-    reward.py
-  models/
-    policy.py
-  eval/
-    eval_gsm8k.py
-  utils/
-    metrics.py
-```
+## 2. Solver
 
+For each generated task `q`, the solver produces multiple candidate solutions.
+
+To induce quality variation, we sample from different parts of the solver’s distribution:
+
+- Higher temperature sampling
+- Best-of-N sampling
+- Weaker checkpoints or smaller models (optional)
+
+This produces a candidate answer set:
+
+\[
+A = \{a_1, \dots, a_k\}
+\]
+
+These answers represent a distribution of outputs with varying expected quality.
+
+---
+
+## 3. Judge
+
+The judge evaluates:
+
+- Individual answers
+- Pairwise comparisons
+- Rankings over the solution set
+
+Formally:
+
+\[
+s_i = J(q, a_i)
+\]
+
+or
+
+\[
+J(q, a_i, a_j) \rightarrow \text{preference}
+\]
+
+Because the judge is stochastic, we run multiple judging passes:
+
+\[
+s_i^{(1)}, s_i^{(2)}, \dots
+\]
+
+From these we compute evaluation stability statistics.
+
+---
+
+# Reliability Metrics
+
+For each question `q`, we compute reliability signals to measure how stable and discriminative the evaluation is.
+
+## Score Consistency
+
+Low variance across repeated judging:
+
+\[
+R_{\text{cons}}(q) = 1 - \mathrm{Var}(J(q, a_i))
+\]
+
+---
+
+## Strong vs Weak Separation
+
+Measures whether stronger sampling regimes consistently outperform weaker ones:
+
+\[
+R_{\text{sep}}(q) = \mathbb{E}[J(q, a_{\text{strong}})] - \mathbb{E}[J(q, a_{\text{weak}})]
+\]
+
+---
+
+## Preference Stability
+
+Agreement rate across repeated pairwise judgments:
+
+\[
+R_{\text{stab}}(q) = \Pr\big(J^{(k)}(a_i \succ a_j)\ \text{consistent}\big)
+\]
+
+---
+
+These metrics approximate whether a question is **easy to verify**, meaning good and bad answers can be reliably distinguished.
+
+---
+
+# Generator Objective
+
+The generator is updated via reinforcement learning to maximize reliability:
+
+\[
+R_G(q) = f(R_{\text{cons}}(q), R_{\text{sep}}(q), R_{\text{stab}}(q))
+\]
+
+This differs from difficulty-only objectives by explicitly favoring tasks that produce stable training signals.
+
+Over time, the generator shifts toward questions where evaluation is consistent and discriminative.
+
+---
+
+# Solver Update
+
+The solver is updated using judged scores or preferences.
+
+Possible optimization methods:
+
+- Preference optimization (DPO-style)
+- Policy gradient
+- Offline ranking loss
+
+For example, if \(a_i\) is preferred over \(a_j\):
+
+\[
+\theta_S \leftarrow \theta_S + \nabla \log P(a_i \mid q)
+\]
+
+Training is restricted to questions passing reliability thresholds.
+
+---
+
+# Iterative Training Loop
+
+Each iteration:
+
+1. Sample questions from generator
+2. Sample multiple solver responses
+3. Evaluate responses with judge
+4. Compute reliability metrics
+5. Update generator using reliability reward
+6. Update solver using judged preferences
+
+This forms a closed loop:
+
+- Generator adapts the task distribution
+- Solver improves on reliably evaluable problems
+- Judge provides feedback
+
+---
+
+# Deployment Context
+
+This procedure:
+
+- Does not require training a new base model
+- Can be applied as post-training to open-weight models
+- May use the same model for generator/solver roles
+- Requires no new human annotations
+
+The system enables iterative behavioral refinement using only model-generated data and reliability-based feedback.
+
+---

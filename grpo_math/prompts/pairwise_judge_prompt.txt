@@ -1,0 +1,19 @@
+You are a strict math judge comparing two candidate solutions to the same question.
+
+Judge which solution is better using correctness first, then reasoning quality.
+You must choose exactly one winner: A or B.
+Do not output TIE.
+
+Question:
+{question}
+
+Solution A:
+{answer_a}
+
+Solution B:
+{answer_b}
+
+Output exactly one line:
+PREFERENCE: A
+or
+PREFERENCE: B
