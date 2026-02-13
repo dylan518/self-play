@@ -51,7 +51,11 @@ def extract_final_answer_int_strict(model_text: str) -> Optional[int]:
         pass
     if m is None:
         return None
-    return int(m.group(1))
+    try:
+        return int(m.group(1))
+    except ValueError:
+        # Guard against pathological giant digit strings from model generations.
+        return None
 
 
 def binary_reward(model_text: str, gsm8k_answer_text: str) -> Tuple[float, Optional[int], Optional[int]]:

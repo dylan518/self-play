@@ -1,7 +1,7 @@
 seed: 1234
 
 pairwise:
-  num_questions: 20
+  num_questions: 10
   max_pairs_per_question: 10
   elo_k_factor: 24.0
   elo_initial_rating: 1000.0
@@ -23,15 +23,15 @@ solver:
   torch_dtype: "bfloat16"
   use_chat_template: true
   enable_thinking: false
-  num_solutions_per_question: 5
+  num_solutions_per_question: 10
   sampling_groups:
-    - count: 2
+    - count: 4
       temperature: 0.5
       top_p: 0.8
-    - count: 2
+    - count: 4
       temperature: 0.8
       top_p: 0.9
-    - count: 1
+    - count: 2
       temperature: 1.1
       top_p: 0.98
   prompt_template: |
@@ -45,8 +45,9 @@ solver:
     FINAL_ANSWER: <integer>
   temperature: 0.8
   top_p: 0.9
-  max_new_tokens: 1024
+  max_new_tokens: 16384
   batch_size: 2
+  batch_across_questions: false
 
 judge:
   model_name_or_path: "Qwen/Qwen3-4B"

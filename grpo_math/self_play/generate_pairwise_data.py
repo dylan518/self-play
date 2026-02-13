@@ -326,6 +326,7 @@ def main() -> None:
     num_solutions = int(sol_cfg.get("num_solutions_per_question", 4))
     repeats = int(judge_cfg.get("repeats_per_pair", 3))
     randomize_judge_order = bool(judge_cfg.get("randomize_a_b_order", True))
+    balanced_judge_order = bool(judge_cfg.get("balanced_a_b_order", True))
     elo_k = float(pair_cfg.get("elo_k_factor", 24.0))
     elo_initial = float(pair_cfg.get("elo_initial_rating", 1000.0))
     max_pairs_per_question = pair_cfg.get("max_pairs_per_question", None)
@@ -359,6 +360,7 @@ def main() -> None:
                 "top_p": float(sol_cfg.get("top_p", 0.9)),
             }
         ]
+    batch_solver_across_questions = bool(sol_cfg.get("batch_across_questions", True))
 
     raw_gen_prompt = question_template
     generator_prompt = _apply_chat_template(
@@ -396,41 +398,69 @@ def main() -> None:
         questions.append(parsed)
         cleaned_question_generations.append(raw)
 
-    # Batch solver generation across all questions for better throughput.
-    raw_solver_prompts = [solver_template.format(question=q) for q in questions]
-    solver_prompts = [
-        _apply_chat_template(
-            sol_bundle.tokenizer,
-            raw_prompt,
-            bool(sol_cfg.get("use_chat_template", False)),
-            sol_cfg.get("enable_thinking", None),
-        )
-        for raw_prompt in raw_solver_prompts
-    ]
-    solver_outputs_by_question: List[List[str]] = [[] for _ in range(len(questions))]
     solver_batch_size = int(sol_cfg.get("batch_size", 16))
     solver_max_new_tokens = int(sol_cfg.get("max_new_tokens", 512))
-    for grp in sampling_groups:
-        prompts_for_group: List[str] = []
-        prompt_question_indices: List[int] = []
-        group_count = int(grp["count"])
-        for q_idx, prompt in enumerate(solver_prompts):
-            prompts_for_group.extend([prompt] * group_count)
-            prompt_question_indices.extend([q_idx] * group_count)
-        group_outputs = _generate_texts(
-            sol_bundle,
-            prompts_for_group,
-            temperature=float(grp["temperature"]),
-            top_p=float(grp["top_p"]),
-            max_new_tokens=solver_max_new_tokens,
-            batch_size=solver_batch_size,
-        )
-        for q_idx, output in zip(prompt_question_indices, group_outputs):
-            solver_outputs_by_question[q_idx].append(output)
+
+    def _generate_solver_outputs_for_prompt(solver_prompt: str) -> List[str]:
+        outputs: List[str] = []
+        for grp in sampling_groups:
+            group_count = int(grp["count"])
+            group_outputs = _generate_texts(
+                sol_bundle,
+                [solver_prompt] * group_count,
+                temperature=float(grp["temperature"]),
+                top_p=float(grp["top_p"]),
+                max_new_tokens=solver_max_new_tokens,
+                batch_size=solver_batch_size,
+            )
+            outputs.extend(group_outputs)
+        return outputs
+
+    # Optional global batching mode for throughput on short generations.
+    solver_outputs_by_question: List[List[str]] = []
+    if batch_solver_across_questions:
+        raw_solver_prompts = [solver_template.format(question=q) for q in questions]
+        solver_prompts = [
+            _apply_chat_template(
+                sol_bundle.tokenizer,
+                raw_prompt,
+                bool(sol_cfg.get("use_chat_template", False)),
+                sol_cfg.get("enable_thinking", None),
+            )
+            for raw_prompt in raw_solver_prompts
+        ]
+        solver_outputs_by_question = [[] for _ in range(len(questions))]
+        for grp in sampling_groups:
+            prompts_for_group: List[str] = []
+            prompt_question_indices: List[int] = []
+            group_count = int(grp["count"])
+            for q_idx, prompt in enumerate(solver_prompts):
+                prompts_for_group.extend([prompt] * group_count)
+                prompt_question_indices.extend([q_idx] * group_count)
+            group_outputs = _generate_texts(
+                sol_bundle,
+                prompts_for_group,
+                temperature=float(grp["temperature"]),
+                top_p=float(grp["top_p"]),
+                max_new_tokens=solver_max_new_tokens,
+                batch_size=solver_batch_size,
+            )
+            for q_idx, output in zip(prompt_question_indices, group_outputs):
+                solver_outputs_by_question[q_idx].append(output)
 
     with out_path.open("w", encoding="utf-8") as f:
         for q_idx, question in enumerate(tqdm(questions, desc="pairwise_rollouts", unit="q"), start=1):
-            solver_outputs = solver_outputs_by_question[q_idx - 1]
+            if batch_solver_across_questions:
+                solver_outputs = solver_outputs_by_question[q_idx - 1]
+            else:
+                raw_solver_prompt = solver_template.format(question=question)
+                solver_prompt = _apply_chat_template(
+                    sol_bundle.tokenizer,
+                    raw_solver_prompt,
+                    bool(sol_cfg.get("use_chat_template", False)),
+                    sol_cfg.get("enable_thinking", None),
+                )
+                solver_outputs = _generate_solver_outputs_for_prompt(solver_prompt)
             if len(solver_outputs) != num_solutions:
                 raise RuntimeError(
                     f"Expected {num_solutions} solver outputs for question index {q_idx - 1}, "
@@ -447,11 +477,16 @@ def main() -> None:
                 judge_prompts: List[str] = []
                 raw_judge_prompt_for_pair: str | None = None
                 judge_presentations: List[Dict[str, int]] = []
-                for _ in range(repeats):
-                    if randomize_judge_order and bool(random.getrandbits(1)):
-                        a_idx, b_idx = j, i
-                    else:
+                swap_offset = int(bool(random.getrandbits(1)))
+                for rep_idx in range(repeats):
+                    if not randomize_judge_order:
                         a_idx, b_idx = i, j
+                    elif balanced_judge_order:
+                        # Ensure near-equal A/B exposure per pair, which cancels position bias.
+                        use_swapped = ((rep_idx + swap_offset) % 2 == 1)
+                        a_idx, b_idx = (j, i) if use_swapped else (i, j)
+                    else:
+                        a_idx, b_idx = (j, i) if bool(random.getrandbits(1)) else (i, j)
                     raw_judge_prompt = judge_template.format(
                         question=question,
                         answer_a=solver_outputs[a_idx],
