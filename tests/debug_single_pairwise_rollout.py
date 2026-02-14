@@ -21,6 +21,11 @@ def main() -> None:
         default="grpo_math/configs/pairwise_rollouts_debug.yaml",
         help="Path to pairwise rollout config.",
     )
+    ap.add_argument(
+        "--reset-output",
+        action="store_true",
+        help="If set, delete existing output file before running.",
+    )
     args = ap.parse_args()
 
     root = _repo_root()
@@ -34,7 +39,7 @@ def main() -> None:
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     out_path = root / cfg["output"]["jsonl_path"]
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if out_path.exists():
+    if args.reset_output and out_path.exists():
         out_path.unlink()
 
     cmd = [

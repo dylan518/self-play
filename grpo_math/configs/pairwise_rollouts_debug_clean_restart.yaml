@@ -63,13 +63,12 @@ judge:
 
 output:
   include_judge_traces: true
-  jsonl_path: "outputs/pairwise_rollouts_debug/samples.jsonl"
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_clean_restart.jsonl"
   write_mode: "append"
 
 strong_verifier:
   enabled: true
   provider: "openai"
   model: "gpt-4.1"
-  # Optional override for OpenAI-compatible endpoints.
   base_url: "https://api.openai.com/v1"
   timeout_s: 60

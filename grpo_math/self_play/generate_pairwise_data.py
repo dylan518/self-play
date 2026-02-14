@@ -6,6 +6,7 @@ import json
 import os
 import random
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -37,6 +38,18 @@ class ModelBundle:
 def _load_yaml(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def _read_last_jsonl_row(path: Path) -> Dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not lines:
+            return None
+        return json.loads(lines[-1])
+    except Exception:
+        return None
 
 
 def _torch_dtype(name: str) -> torch.dtype:
@@ -84,6 +97,8 @@ def _load_text(path: str) -> str:
 
 
 def _apply_chat_template(tokenizer: Any, prompt: str, use_chat_template: bool, enable_thinking: bool | None) -> str:
+    if tokenizer is None:
+        return prompt
     if not use_chat_template:
         return prompt
     if not getattr(tokenizer, "chat_template", None):
@@ -230,7 +245,7 @@ def _openai_oracle_answer(
             {"role": "system", "content": "You are a precise math solver."},
             {"role": "user", "content": prompt},
         ],
-        "max_tokens": 64,
+        "max_completion_tokens": 64,
     }
     req = urllib.request.Request(
         url=base_url.rstrip("/") + "/chat/completions",
@@ -258,6 +273,74 @@ def _openai_oracle_answer(
         return None, None, f"{type(e).__name__}: {e}"
 
 
+def _openai_generate_texts(
+    *,
+    prompts: Sequence[str],
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float,
+    max_completion_tokens: int,
+    timeout_s: float,
+    min_interval_s: float = 0.0,
+    max_retries: int = 6,
+    initial_backoff_s: float = 1.0,
+) -> List[str]:
+    last_request_at = 0.0
+
+    def _throttle() -> None:
+        nonlocal last_request_at
+        if min_interval_s <= 0:
+            return
+        now = time.monotonic()
+        wait_s = (last_request_at + min_interval_s) - now
+        if wait_s > 0:
+            time.sleep(wait_s)
+        last_request_at = time.monotonic()
+
+    outputs: List[str] = []
+    for prompt in prompts:
+        payload = {
+            "model": model,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_completion_tokens": max_completion_tokens,
+        }
+        backoff_s = max(0.0, initial_backoff_s)
+        attempt = 0
+        while True:
+            attempt += 1
+            _throttle()
+            req = urllib.request.Request(
+                url=base_url.rstrip("/") + "/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                outputs.append(str(body["choices"][0]["message"]["content"]).strip())
+                break
+            except urllib.error.HTTPError as e:
+                # Retry on server/transient throttling errors.
+                if e.code in (429, 500, 502, 503, 504) and attempt <= max_retries:
+                    time.sleep(backoff_s)
+                    backoff_s = min(backoff_s * 2.0, 30.0)
+                    continue
+                raise
+            except Exception:
+                if attempt <= max_retries:
+                    time.sleep(backoff_s)
+                    backoff_s = min(backoff_s * 2.0, 30.0)
+                    continue
+                raise
+    return outputs
+
+
 def _read_env_var_from_dotenv(var_name: str, dotenv_path: Path = Path(".env")) -> str | None:
     if not dotenv_path.exists():
         return None
@@ -277,6 +360,22 @@ def _read_env_var_from_dotenv(var_name: str, dotenv_path: Path = Path(".env")) -
     return None
 
 
+def _cfg_uses_openai(role_cfg: Dict[str, Any]) -> bool:
+    provider = str(role_cfg.get("api_provider", "")).lower()
+    model_name = str(role_cfg.get("model_name_or_path", ""))
+    return provider == "openai" or model_name.startswith("openai:")
+
+
+def _cfg_openai_model(role_cfg: Dict[str, Any]) -> str:
+    explicit = str(role_cfg.get("api_model", "")).strip()
+    if explicit:
+        return explicit
+    model_name = str(role_cfg.get("model_name_or_path", ""))
+    if model_name.startswith("openai:"):
+        return model_name.split(":", 1)[1].strip()
+    return "gpt-4.1"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=str, default="grpo_math/configs/pairwise_rollouts_smoke.yaml")
@@ -294,20 +393,36 @@ def main() -> None:
     out_cfg = cfg["output"]
     strong_cfg = cfg.get("strong_verifier", {})
 
-    gen_bundle = _load_model_bundle(
-        gen_cfg["model_name_or_path"],
-        _torch_dtype(gen_cfg.get("torch_dtype", "bfloat16")),
-        bool(gen_cfg.get("use_flash_attn", False)),
+    gen_is_openai = _cfg_uses_openai(gen_cfg)
+    sol_is_openai = _cfg_uses_openai(sol_cfg)
+    judge_is_openai = _cfg_uses_openai(judge_cfg)
+
+    gen_bundle = (
+        ModelBundle(model=None, tokenizer=None)
+        if gen_is_openai
+        else _load_model_bundle(
+            gen_cfg["model_name_or_path"],
+            _torch_dtype(gen_cfg.get("torch_dtype", "bfloat16")),
+            bool(gen_cfg.get("use_flash_attn", False)),
+        )
     )
-    sol_bundle = _load_model_bundle(
-        sol_cfg["model_name_or_path"],
-        _torch_dtype(sol_cfg.get("torch_dtype", "bfloat16")),
-        bool(sol_cfg.get("use_flash_attn", False)),
+    sol_bundle = (
+        ModelBundle(model=None, tokenizer=None)
+        if sol_is_openai
+        else _load_model_bundle(
+            sol_cfg["model_name_or_path"],
+            _torch_dtype(sol_cfg.get("torch_dtype", "bfloat16")),
+            bool(sol_cfg.get("use_flash_attn", False)),
+        )
     )
-    judge_bundle = _load_model_bundle(
-        judge_cfg["model_name_or_path"],
-        _torch_dtype(judge_cfg.get("torch_dtype", "bfloat16")),
-        bool(judge_cfg.get("use_flash_attn", False)),
+    judge_bundle = (
+        ModelBundle(model=None, tokenizer=None)
+        if judge_is_openai
+        else _load_model_bundle(
+            judge_cfg["model_name_or_path"],
+            _torch_dtype(judge_cfg.get("torch_dtype", "bfloat16")),
+            bool(judge_cfg.get("use_flash_attn", False)),
+        )
     )
 
     question_template = _load_text(gen_cfg["prompt_template_path"])
@@ -316,6 +431,19 @@ def main() -> None:
 
     out_path = Path(out_cfg["jsonl_path"])
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_mode = str(out_cfg.get("write_mode", "append")).lower()
+    if write_mode not in {"append", "overwrite"}:
+        raise ValueError(f"Unsupported output.write_mode: {write_mode}. Use 'append' or 'overwrite'.")
+    file_open_mode = "a" if write_mode == "append" else "w"
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    question_index_base = 0
+    if file_open_mode == "a":
+        last_row = _read_last_jsonl_row(out_path)
+        if isinstance(last_row, dict):
+            try:
+                question_index_base = int(last_row.get("question_index", -1)) + 1
+            except Exception:
+                question_index_base = 0
     include_judge_traces = bool(out_cfg.get("include_judge_traces", False))
     strong_enabled = bool(strong_cfg.get("enabled", False))
     strong_provider = str(strong_cfg.get("provider", "openai")).lower()
@@ -361,6 +489,47 @@ def main() -> None:
             }
         ]
     batch_solver_across_questions = bool(sol_cfg.get("batch_across_questions", True))
+    openai_api_key = (
+        os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("OPENAI_KEY")
+        or _read_env_var_from_dotenv("OPENAI_API_KEY")
+        or _read_env_var_from_dotenv("OPENAI_KEY")
+    )
+    openai_base_url = "https://api.openai.com/v1"
+
+    def _role_generate_texts(
+        role_cfg: Dict[str, Any],
+        role_bundle: ModelBundle,
+        prompts: Sequence[str],
+        *,
+        temperature: float,
+        top_p: float,
+        max_new_tokens: int,
+        batch_size: int,
+    ) -> List[str]:
+        if _cfg_uses_openai(role_cfg):
+            if not openai_api_key:
+                raise RuntimeError("OPENAI_API_KEY (or OPENAI_KEY) is required for OpenAI-backed roles.")
+            return _openai_generate_texts(
+                prompts=prompts,
+                model=_cfg_openai_model(role_cfg),
+                api_key=openai_api_key,
+                base_url=str(role_cfg.get("api_base_url", openai_base_url)),
+                temperature=temperature,
+                max_completion_tokens=max_new_tokens,
+                timeout_s=float(role_cfg.get("api_timeout_s", 120.0)),
+                min_interval_s=float(role_cfg.get("api_min_interval_s", 0.0)),
+                max_retries=int(role_cfg.get("api_max_retries", 6)),
+                initial_backoff_s=float(role_cfg.get("api_backoff_initial_s", 1.0)),
+            )
+        return _generate_texts(
+            role_bundle,
+            prompts,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            batch_size=batch_size,
+        )
 
     raw_gen_prompt = question_template
     generator_prompt = _apply_chat_template(
@@ -370,7 +539,8 @@ def main() -> None:
         gen_cfg.get("enable_thinking", None),
     )
     generator_prompts = [generator_prompt] * num_questions
-    question_generations = _generate_texts(
+    question_generations = _role_generate_texts(
+        gen_cfg,
         gen_bundle,
         generator_prompts,
         temperature=float(gen_cfg.get("temperature", 1.0)),
@@ -384,7 +554,8 @@ def main() -> None:
         parsed = _parse_question(raw)
         tries = 0
         while (not _looks_like_question_only(raw, parsed)) and tries < max_retries:
-            retry_outputs = _generate_texts(
+            retry_outputs = _role_generate_texts(
+                gen_cfg,
                 gen_bundle,
                 [generator_prompt],
                 temperature=float(gen_cfg.get("temperature", 1.0)),
@@ -405,7 +576,8 @@ def main() -> None:
         outputs: List[str] = []
         for grp in sampling_groups:
             group_count = int(grp["count"])
-            group_outputs = _generate_texts(
+            group_outputs = _role_generate_texts(
+                sol_cfg,
                 sol_bundle,
                 [solver_prompt] * group_count,
                 temperature=float(grp["temperature"]),
@@ -437,7 +609,8 @@ def main() -> None:
             for q_idx, prompt in enumerate(solver_prompts):
                 prompts_for_group.extend([prompt] * group_count)
                 prompt_question_indices.extend([q_idx] * group_count)
-            group_outputs = _generate_texts(
+            group_outputs = _role_generate_texts(
+                sol_cfg,
                 sol_bundle,
                 prompts_for_group,
                 temperature=float(grp["temperature"]),
@@ -448,7 +621,7 @@ def main() -> None:
             for q_idx, output in zip(prompt_question_indices, group_outputs):
                 solver_outputs_by_question[q_idx].append(output)
 
-    with out_path.open("w", encoding="utf-8") as f:
+    with out_path.open(file_open_mode, encoding="utf-8") as f:
         for q_idx, question in enumerate(tqdm(questions, desc="pairwise_rollouts", unit="q"), start=1):
             if batch_solver_across_questions:
                 solver_outputs = solver_outputs_by_question[q_idx - 1]
@@ -503,7 +676,8 @@ def main() -> None:
                     )
                     judge_prompts.append(judge_prompt)
 
-                judge_outputs = _generate_texts(
+                judge_outputs = _role_generate_texts(
+                    judge_cfg,
                     judge_bundle,
                     judge_prompts,
                     temperature=float(judge_cfg.get("temperature", 0.4)),
@@ -597,8 +771,9 @@ def main() -> None:
                     )
 
             row = {
+                "run_id": run_id,
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "question_index": q_idx - 1,
+                "question_index": question_index_base + (q_idx - 1),
                 "question": question,
                 "generator_raw_output": cleaned_question_generations[q_idx - 1],
                 "solutions": [
