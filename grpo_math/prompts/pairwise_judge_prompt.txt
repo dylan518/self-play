@@ -4,6 +4,12 @@ Judge which solution is better using correctness first, then reasoning quality.
 You must choose exactly one winner: A or B.
 Do not output TIE.
 
+Rules:
+1) If exactly one solution provides an explicit final integer answer, prefer that one.
+2) If both provide final answers and they differ, prefer the answer supported by more coherent and internally consistent reasoning.
+3) If neither provides a clear final answer, prefer the one with clearer, less self-contradictory reasoning.
+4) Prefer concise, checkable reasoning over verbose but vague text.
+
 Question:
 {question}
 
