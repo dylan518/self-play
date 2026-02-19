@@ -48,11 +48,11 @@ solver:
     - count: 5
       temperature: 0.3
       top_p: 0.9
-    # Group 1: weak — high temperature, noisy sampling (weaker model optional via api_model override)
+    # Group 1: weak — weaker model to create a real capability gap
     - count: 5
-      temperature: 2.0
+      temperature: 1.0
       top_p: 0.95
-      # api_model: "gemini-2.0-flash-lite"  # uncomment to use a weaker model for group 1
+      api_model: "gemini-2.0-flash-lite"
   prompt_template: |
     Question:
     {question}
@@ -107,7 +107,7 @@ judge:
 
 output:
   include_judge_traces: false
-  jsonl_path: "outputs/pairwise_rollouts_debug/samples_gemini25flash_single_verify_fast.jsonl"
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_gemini25flash_v5_flash_lite_weak.jsonl"
   write_mode: "overwrite"
 
 strong_verifier:
