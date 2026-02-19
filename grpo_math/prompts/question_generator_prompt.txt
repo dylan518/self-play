@@ -9,7 +9,7 @@ Verifiability requirement: given the answer, checking it must be fast and direct
 - Modular arithmetic: verify by direct computation of the mod
 - Geometry with explicit coordinates or lengths: verify by formula substitution
 
-Difficulty: the problem should require non-trivial reasoning or computation to solve, even though the answer is easy to check once you have it. Avoid problems that are solvable by inspection or in one step.
+Difficulty: the problem should be hard enough that you yourself are not confident you could solve it correctly. If you could solve it easily in your head, it is too easy. The answer should require real effort to find, even though it is easy to verify once you have it.
 
 Avoid:
 - Multi-step inventory or flow problems (selling fractions of fractions, etc.) where checking the answer requires redoing all the steps

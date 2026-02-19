@@ -12,47 +12,39 @@ from grpo_math.self_play.generate_pairwise_data import (
 
 QUESTIONS = [
     {
-        "label": "Q38 pool-rate",
+        "label": "modular-inverse",
         "question": (
-            "A rectangular swimming pool has a length of 50 meters and a width of 25 meters. "
-            "It is filled with water to a depth of 2 meters. If water evaporates at a rate of "
-            "0.5 cubic meters per hour, and a filtration system pumps water out at a rate of "
-            "1.2 cubic meters per hour for 8 hours each day, while a hose adds water at a rate "
-            "of 0.8 cubic meters per hour for 6 hours each day, what will be the depth of the "
-            "water in centimeters after 10 full days, assuming no one uses the pool?"
+            "Find the smallest positive integer x such that 137x ≡ 1 (mod 256)."
         ),
-        "oracle": 187,
+        "oracle": 185,
     },
     {
-        "label": "Q17 flour-profit",
+        "label": "digit-sum-powers",
         "question": (
-            "A baker starts with a 50 kg bag of flour. He uses 1/5 of it to bake cookies, "
-            "then 1/4 of the remaining flour for cakes. The rest of the flour is divided "
-            "equally into 12 smaller bags for sale. If each smaller bag is sold for $3, and "
-            "the baker spent $45 on the original 50 kg bag, what is his total profit from "
-            "the sale of these smaller bags?"
+            "Let S(n) denote the sum of digits of n. Find S(S(S(4444^4444)))."
         ),
-        "oracle": -9,
+        "oracle": 7,
     },
     {
-        "label": "Q49 bakery-revenue",
+        "label": "perfect-square-param",
         "question": (
-            "A small artisanal bakery bakes loaves of bread for local restaurants. On Monday, "
-            "they produced 120 loaves. On Tuesday, they increased their production by 25% "
-            "compared to Monday. On Wednesday, they produced 10% fewer loaves than they did "
-            "on Tuesday. For every 10 loaves produced, 3 are rye bread, and the rest are "
-            "sourdough. Each rye bread loaf sells for $6, and each sourdough loaf sells for $8. "
-            "If all the loaves produced from Monday to Wednesday were sold, what was the total "
-            "revenue in dollars for these three days?"
+            "Find the largest integer n < 1000 such that n^2 + 85n + 2024 is a perfect square."
         ),
-        "oracle": 2997,
+        "oracle": 175,
+    },
+    {
+        "label": "trailing-zeros",
+        "question": (
+            "How many trailing zeros does 1000! have?"
+        ),
+        "oracle": 249,
     },
 ]
 
 PROMPT_TEMPLATE = (
     "Question:\n{question}\n\n"
     "Solve step by step. Use plain text only, no LaTeX, no markdown.\n"
-    "Keep your entire response under 10 lines.\n"
+    "Keep your entire response under 30 lines.\n"
     "Your last line must be exactly:\n"
     "FINAL_ANSWER: <integer>"
 )

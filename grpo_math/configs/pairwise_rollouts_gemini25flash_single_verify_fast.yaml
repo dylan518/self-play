@@ -58,7 +58,7 @@ solver:
     {question}
 
     Solve step by step. Use plain text only, no LaTeX, no markdown.
-    Keep your entire response under 10 lines.
+    Keep your entire response under 30 lines.
     Your last line must be exactly:
     FINAL_ANSWER: <integer>
   temperature: 1.0
