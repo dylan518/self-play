@@ -42,6 +42,8 @@ _BATCH_VERIFY_LINE_RE = re.compile(
 )
 _BOXED_INT_RE = re.compile(r"\\boxed\{\s*(-?\d+)\s*\}")
 _FINAL_TEXT_INT_RE = re.compile(r"(?:Final Answer|Final answer)\s*[:\-]?\s*(-?\d+)\b")
+_ANSWER_IS_INT_RE = re.compile(r"(?:answer|result)\s+is\s+(-?\d+)", flags=re.IGNORECASE)
+_EQUALS_INT_EOL_RE = re.compile(r"=\s*(-?\d+)\s*$", flags=re.MULTILINE)
 _ANY_INT_RE = re.compile(r"-?\d+")
 
 
@@ -236,6 +238,12 @@ def _parse_solver_final_answer(text: str) -> int | None:
     final_text_matches = _FINAL_TEXT_INT_RE.findall(text)
     if final_text_matches:
         return int(final_text_matches[-1])
+    answer_is_matches = _ANSWER_IS_INT_RE.findall(text)
+    if answer_is_matches:
+        return int(answer_is_matches[-1])
+    equals_eol_matches = _EQUALS_INT_EOL_RE.findall(text)
+    if equals_eol_matches:
+        return int(equals_eol_matches[-1])
     return None
 
 
@@ -299,10 +307,11 @@ def _openai_oracle_answer(
     base_url: str = "https://api.openai.com/v1",
     timeout_s: float = 60.0,
     max_tokens_param: str = "max_completion_tokens",
+    max_tokens: int = 1024,
 ) -> tuple[int | None, str | None, str | None]:
     prompt = (
-        "Solve the following math question.\n"
-        "Return only one line in this exact format:\n"
+        "Solve the following math question step by step.\n"
+        "Show your reasoning, then end your response with this exact line:\n"
         "FINAL_ANSWER: <integer>\n\n"
         f"Question: {question}\n"
     )
@@ -314,7 +323,7 @@ def _openai_oracle_answer(
             {"role": "user", "content": prompt},
         ],
     }
-    payload[max_tokens_param] = 64
+    payload[max_tokens_param] = max_tokens
     req = urllib.request.Request(
         url=base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
@@ -807,6 +816,39 @@ def main() -> None:
             f"Examples:\n{examples}"
         )
 
+    # Deduplicate: re-generate questions that are identical to an earlier one in the batch.
+    seen_questions: set[str] = set()
+    dup_indices: list[int] = []
+    for idx, q in enumerate(questions):
+        norm = q.strip().lower()
+        if norm in seen_questions:
+            dup_indices.append(idx)
+        else:
+            seen_questions.add(norm)
+    dedup_round = 0
+    while dup_indices and dedup_round < max_retries:
+        retry_qs = _role_generate_texts(
+            gen_cfg,
+            gen_bundle,
+            [generator_prompt] * len(dup_indices),
+            temperature=float(gen_cfg.get("temperature", 1.0)),
+            top_p=float(gen_cfg.get("top_p", 0.95)),
+            max_new_tokens=int(gen_cfg.get("max_new_tokens", 128)),
+            batch_size=max(1, int(gen_cfg.get("batch_size", 8))),
+        )
+        still_dup: list[int] = []
+        for idx, new_raw in zip(dup_indices, retry_qs):
+            new_q = _parse_question(new_raw)
+            norm = new_q.strip().lower()
+            if norm and norm not in seen_questions:
+                questions[idx] = new_q
+                cleaned_question_generations[idx] = new_raw
+                seen_questions.add(norm)
+            else:
+                still_dup.append(idx)
+        dup_indices = still_dup
+        dedup_round += 1
+
     solver_batch_size = int(sol_cfg.get("batch_size", 16))
     solver_max_new_tokens = int(sol_cfg.get("max_new_tokens", 512))
 
@@ -1175,10 +1217,10 @@ def main() -> None:
             oracle_error: str | None = None
             if strong_enabled and strong_provider == "openai":
                 api_key = (
-                    os.environ.get("OPENAI_API_KEY")
-                    or os.environ.get("OPENAI_KEY")
-                    or _read_env_var_from_dotenv("OPENAI_API_KEY")
+                    _read_env_var_from_dotenv("OPENAI_API_KEY")
                     or _read_env_var_from_dotenv("OPENAI_KEY")
+                    or os.environ.get("OPENAI_API_KEY")
+                    or os.environ.get("OPENAI_KEY")
                 )
                 if not api_key:
                     oracle_error = "OPENAI_API_KEY (or OPENAI_KEY) is not set."
@@ -1192,6 +1234,7 @@ def main() -> None:
                         max_tokens_param=str(
                             strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
                         ),
+                        max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
                     )
 
             row = {
