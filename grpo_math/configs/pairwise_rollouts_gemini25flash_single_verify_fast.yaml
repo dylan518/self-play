@@ -15,10 +15,10 @@ generator:
   api_reasoning_effort: "none"
   api_max_tokens_param: "max_tokens"
   api_timeout_s: 90
-  api_min_interval_s: 0.0
-  api_max_retries: 8
-  api_backoff_initial_s: 0.5
-  api_max_parallel: 100
+  api_min_interval_s: 2.0
+  api_max_retries: 12
+  api_backoff_initial_s: 5.0
+  api_max_parallel: 1
   use_chat_template: false
   enable_thinking: false
   prompt_template_path: "grpo_math/prompts/question_generator_prompt.txt"
