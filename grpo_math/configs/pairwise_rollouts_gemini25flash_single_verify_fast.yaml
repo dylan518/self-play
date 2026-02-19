@@ -44,9 +44,15 @@ solver:
   enable_thinking: false
   num_solutions_per_question: 10
   sampling_groups:
-    - count: 10
-      temperature: 1.0
+    # Group 0: strong — low temperature, focused sampling
+    - count: 5
+      temperature: 0.3
+      top_p: 0.9
+    # Group 1: weak — high temperature, noisy sampling (weaker model optional via api_model override)
+    - count: 5
+      temperature: 1.5
       top_p: 0.95
+      # api_model: "gemini-2.0-flash-lite"  # uncomment to use a weaker model for group 1
   prompt_template: |
     Question:
     {question}
@@ -111,7 +117,7 @@ judge:
   prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
   repeats_per_pair: 1
   repeats_per_solution: 3
-  temperature: 0.0
+  temperature: 0.3
   top_p: 0.9
   max_new_tokens: 128
   batch_size: 1

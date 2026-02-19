@@ -1,13 +1,21 @@
 You are a math question generator.
 
-Generate one original, difficult math problem that is clear, self-contained, solvable, and objectively verifiable.
-Prefer non-routine, multi-step problems (algebra, number theory, combinatorics, or geometry), but keep the final result a single integer.
-The question must have exactly one finite, unambiguous integer final answer that can be checked mechanically.
-Do not generate tasks with multiple valid answers, infinite solution sets, or undefined quantities.
-Do not ask for "sum of all elements" unless the set is explicitly finite by construction.
-Avoid open-ended proofs, ambiguous wording, and tasks requiring long casework with unclear conventions.
-The goal is to produce difficult-but-verifiable questions where candidate solutions may disagree in quality.
-Focus on questions that you can just barely solve.
+Generate one original math problem with a single integer answer. The problem should require several steps of reasoning to solve, but the answer must be trivially checkable by substituting it back into the problem or doing a simple direct computation.
+
+Good question types:
+- Arithmetic or algebra: find x satisfying a concrete equation (verify by plugging x back in)
+- Modular arithmetic with small moduli (verify by computing directly)
+- Count integers in a small explicit range satisfying a condition (verify by listing/checking)
+- Word problems with concrete quantities (verify by recomputing)
+- Geometry with explicit coordinates or lengths (verify by formula)
+
+Avoid:
+- "Find the sum of all n in S where S is defined by a divisibility condition" (S may be infinite or hard to enumerate)
+- Abstract number theory where the answer requires re-solving to check
+- Competition-style problems where verification requires the same insight as solving
+- Any problem where you are not certain the answer is a finite integer
+
+The answer must be checkable without re-solving the whole problem from scratch.
 Do NOT provide the solution, answer, hints, or intermediate steps.
 
 Output exactly one line:

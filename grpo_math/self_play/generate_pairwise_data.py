@@ -639,18 +639,24 @@ def main() -> None:
     max_retries = int(gen_cfg.get("max_retries_per_question", 3))
     sampling_groups_cfg = sol_cfg.get("sampling_groups")
     if sampling_groups_cfg:
-        sampling_groups: List[Dict[str, float | int]] = []
+        sampling_groups: List[Dict[str, Any]] = []
         for grp in sampling_groups_cfg:
             count = int(grp["count"])
             if count <= 0:
                 continue
-            sampling_groups.append(
-                {
-                    "count": count,
-                    "temperature": float(grp.get("temperature", sol_cfg.get("temperature", 0.8))),
-                    "top_p": float(grp.get("top_p", sol_cfg.get("top_p", 0.9))),
-                }
-            )
+            entry: Dict[str, Any] = {
+                "count": count,
+                "temperature": float(grp.get("temperature", sol_cfg.get("temperature", 0.8))),
+                "top_p": float(grp.get("top_p", sol_cfg.get("top_p", 0.9))),
+            }
+            # Optional per-group model/URL override (for using a weaker model as the "weak" group)
+            if grp.get("api_model"):
+                entry["api_model"] = str(grp["api_model"])
+            if grp.get("api_base_url"):
+                entry["api_base_url"] = str(grp["api_base_url"])
+            if grp.get("api_key_env"):
+                entry["api_key_env"] = str(grp["api_key_env"])
+            sampling_groups.append(entry)
         total_group_count = sum(int(g["count"]) for g in sampling_groups)
         if total_group_count != num_solutions:
             raise ValueError(
@@ -665,6 +671,10 @@ def main() -> None:
                 "top_p": float(sol_cfg.get("top_p", 0.9)),
             }
         ]
+    # Build solution_group_map: solution_group_map[s_idx] = group_index (same for every question)
+    solution_group_map: List[int] = []
+    for grp_idx, grp in enumerate(sampling_groups):
+        solution_group_map.extend([grp_idx] * int(grp["count"]))
     batch_solver_across_questions = bool(sol_cfg.get("batch_across_questions", True))
     openai_api_key = _resolve_api_key({})
     openai_base_url = "https://api.openai.com/v1"
@@ -852,12 +862,21 @@ def main() -> None:
     solver_batch_size = int(sol_cfg.get("batch_size", 16))
     solver_max_new_tokens = int(sol_cfg.get("max_new_tokens", 512))
 
+    def _make_group_sol_cfg(grp: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a sol_cfg copy with per-group model/URL overrides applied."""
+        overrides = {k: grp[k] for k in ("api_model", "api_base_url", "api_key_env") if k in grp}
+        if overrides:
+            merged = dict(sol_cfg)
+            merged.update(overrides)
+            return merged
+        return sol_cfg
+
     def _generate_solver_outputs_for_prompt(solver_prompt: str) -> List[str]:
         outputs: List[str] = []
         for grp in sampling_groups:
             group_count = int(grp["count"])
             group_outputs = _role_generate_texts(
-                sol_cfg,
+                _make_group_sol_cfg(grp),
                 sol_bundle,
                 [solver_prompt] * group_count,
                 temperature=float(grp["temperature"]),
@@ -890,7 +909,7 @@ def main() -> None:
                 prompts_for_group.extend([prompt] * group_count)
                 prompt_question_indices.extend([q_idx] * group_count)
             group_outputs = _role_generate_texts(
-                sol_cfg,
+                _make_group_sol_cfg(grp),
                 sol_bundle,
                 prompts_for_group,
                 temperature=float(grp["temperature"]),
@@ -1120,12 +1139,14 @@ def main() -> None:
                 else:
                     verify_jobs: List[Dict[str, Any]] = []
                     for s_idx, s_text in enumerate(solver_outputs):
+                        # Skip solutions with no parsed answer — auto-mark INCORRECT without calling verifier.
+                        if solver_parsed_answers[s_idx] is None:
+                            for _ in range(verify_repeats):
+                                per_solution[s_idx]["verdicts"].append("INCORRECT")
+                                per_solution[s_idx]["model_confidences"].append(0.0)
+                            continue
                         for _ in range(verify_repeats):
-                            candidate_answer = (
-                                str(solver_parsed_answers[s_idx])
-                                if solver_parsed_answers[s_idx] is not None
-                                else "NONE"
-                            )
+                            candidate_answer = str(solver_parsed_answers[s_idx])
                             raw_prompt = verify_template.format(
                                 question=question,
                                 solution=s_text,
@@ -1195,6 +1216,22 @@ def main() -> None:
                         }
                     )
 
+            # Compute R_sep: mean verify score of group 0 (strong) minus group 1 (weak).
+            # Only meaningful when there are >= 2 sampling groups.
+            r_sep: float | None = None
+            group_verify_means: List[float] = []
+            if len(sampling_groups) >= 2 and judge_mode == "single_verify":
+                group_scores_lists: List[List[float]] = [[] for _ in sampling_groups]
+                for s_idx in range(num_solutions):
+                    grp_idx = solution_group_map[s_idx]
+                    n_c = per_solution[s_idx]["verdicts"].count("CORRECT")
+                    verify_score = n_c / max(1, verify_repeats)
+                    group_scores_lists[grp_idx].append(verify_score)
+                group_verify_means = [
+                    sum(gs) / len(gs) if gs else 0.0 for gs in group_scores_lists
+                ]
+                r_sep = group_verify_means[0] - group_verify_means[1]
+
             avg_pairwise_scores = [
                 (score_points[k] / score_counts[k]) if score_counts[k] > 0 else 0.5 for k in range(num_solutions)
             ]
@@ -1246,6 +1283,7 @@ def main() -> None:
                 "solutions": [
                     {
                         "solution_index": s_idx,
+                        "sampling_group": solution_group_map[s_idx],
                         "text": s_text,
                         "parsed_final_answer": (parsed := solver_parsed_answers[s_idx]),
                         "pairwise_score": avg_pairwise_scores[s_idx],
@@ -1274,6 +1312,14 @@ def main() -> None:
                         {
                             "num_solutions_verified": len(verification_rows),
                             "repeats_per_solution": verify_repeats,
+                            **(
+                                {
+                                    "r_sep": r_sep,
+                                    "group_verify_means": group_verify_means,
+                                }
+                                if r_sep is not None
+                                else {}
+                            ),
                         }
                         if judge_mode == "single_verify"
                         else {}
