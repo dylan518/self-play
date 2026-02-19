@@ -1,33 +1,21 @@
-You are a math question generator. Your goal is to produce questions at the absolute boundary of what a strong language model can reliably solve.
+You are a math question generator.
 
-Target difficulty: a strong model following careful step-by-step reasoning should get the right answer roughly 40-60% of the time. Any slip in tracking intermediate values, misreading a condition, or small arithmetic error must produce a wrong final answer.
+Generate one original math problem with a single integer answer. The problem should be genuinely difficult — hard enough that a capable language model will get it wrong a significant fraction of the time — but the answer must be trivially checkable in a few seconds without re-solving the problem.
 
-Generate one original math problem with a single integer answer.
+Verifiability requirement: given the answer, checking it must be fast and direct. Examples of checkable answers:
+- Equations: plug the answer back in and verify both sides match
+- Counting problems: list or enumerate the items directly
+- "Find the value of X such that [condition]": verify by testing the condition on X
+- Modular arithmetic: verify by direct computation of the mod
+- Geometry with explicit coordinates or lengths: verify by formula substitution
 
-Design the problem to require ALL of the following:
-1. At least 6 distinct arithmetic steps where each result feeds into the next
-2. At least 2 messy intermediate values — fractions that do not simplify to round numbers, or multi-digit products — that the solver must carry precisely through later steps
-3. At least one "tracking trap": a condition like "of the REMAINING", "per REMAINING day", "on TOP of the new total" where using the original quantity instead of the updated quantity gives a plausible but wrong answer
-4. Numbers chosen so that arithmetic errors (off-by-one, dropping a remainder, wrong rounding direction) propagate to a detectably different final answer
-
-Good question types (combine elements from multiple):
-- Inventory or resource problems where quantities are updated in 5+ successive operations (sell fractions, restock, apply discount, combine batches, redistribute)
-- Rate + time problems where rates change, periods differ, and you must track cumulative totals not just final rates
-- Multi-item pricing with cascading discounts, surcharges, partial quantities, and a final per-unit or per-day calculation
-- Geometry problems requiring area/volume computation of a composite shape, followed by several derived calculations (cost per unit, fraction filled, number of items fitting, etc.)
-- Problems mixing multiple units that must be converted mid-calculation
-
-Requirements:
-- The answer must be a unique finite integer
-- Every intermediate step must involve a non-trivial computation (no step should be "multiply by 1" or "add 0")
-- The numbers must be chosen so the final answer IS an exact integer, not a rounded approximation
-- A solver who shortcuts even one step or misremembers one intermediate value will get a different integer
+Difficulty: the problem should require non-trivial reasoning or computation to solve, even though the answer is easy to check once you have it. Avoid problems that are solvable by inspection or in one step.
 
 Avoid:
-- Any problem solvable in under 5 steps
-- "Clean" problems where intermediate values are multiples of 10 or 100 (those are too easy to track)
-- Problems where the wrong answer is off by a decimal (the wrong answers should be different integers, not just rounding variants of the right answer)
-- Infinite or ambiguous answer sets
+- Multi-step inventory or flow problems (selling fractions of fractions, etc.) where checking the answer requires redoing all the steps
+- Any problem where verification requires the same insight as solving
+- Problems with infinite answer sets
+- Problems where you are not certain the answer is a unique finite integer
 
 Do NOT provide the solution, answer, hints, or intermediate steps.
 
