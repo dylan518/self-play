@@ -50,6 +50,50 @@ def analyze(records: list[dict], label: str) -> None:
     print(f"  {parsed_count}/{len(all_solutions)} solutions have parsed_final_answer ({parse_pct:.0f}%)")
 
     # ------------------------------------------------------------------
+    # Oracle solve rate: what fraction of solutions / questions are correct
+    # ------------------------------------------------------------------
+    oracle_solutions = [s for r in records for s in r.get("solutions", []) if s.get("oracle_correct") is not None]
+    if oracle_solutions:
+        n_correct_sols = sum(1 for s in oracle_solutions if s.get("oracle_correct") is True)
+        overall_solve_rate = n_correct_sols / len(oracle_solutions)
+
+        # Per-group solve rates
+        groups: dict[int, list[int]] = {}
+        for s in oracle_solutions:
+            g = s.get("sampling_group", 0)
+            if g not in groups:
+                groups[g] = []
+            groups[g].append(1 if s.get("oracle_correct") else 0)
+
+        # Question-level: fraction of questions where at least one solution is correct
+        qs_any_correct = sum(
+            1 for r in records
+            if any(s.get("oracle_correct") is True for s in r.get("solutions", []))
+            and r.get("oracle", {}).get("answer") is not None
+        )
+        qs_with_oracle = sum(1 for r in records if r.get("oracle", {}).get("answer") is not None)
+        # Fraction of questions where ALL solutions are correct
+        qs_all_correct = sum(
+            1 for r in records
+            if r.get("oracle", {}).get("answer") is not None
+            and r.get("solutions")
+            and all(
+                s.get("oracle_correct") is True
+                for s in r["solutions"]
+                if s.get("oracle_correct") is not None
+            )
+        )
+
+        print(f"\n--- ORACLE SOLVE RATE ---")
+        print(f"  Overall: {n_correct_sols}/{len(oracle_solutions)} solutions correct ({overall_solve_rate:.1%})")
+        for g in sorted(groups):
+            vals = groups[g]
+            label = "strong" if g == 0 else "weak" if g == 1 else f"group{g}"
+            print(f"  Group {g} ({label}): {sum(vals)}/{len(vals)} correct ({sum(vals)/len(vals):.1%})")
+        print(f"  Questions with ≥1 correct solution: {qs_any_correct}/{qs_with_oracle} ({qs_any_correct/max(1,qs_with_oracle):.1%})")
+        print(f"  Questions where ALL solutions correct: {qs_all_correct}/{qs_with_oracle} ({qs_all_correct/max(1,qs_with_oracle):.1%})")
+
+    # ------------------------------------------------------------------
     # Verifier accuracy vs oracle
     # ------------------------------------------------------------------
     tp = fp = tn = fn = skipped = 0

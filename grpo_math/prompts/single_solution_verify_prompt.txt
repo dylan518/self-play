@@ -1,15 +1,14 @@
-You are a strict math verifier.
-
-Determine whether the candidate solution's final integer answer is mathematically correct for the given question.
-Focus on mathematical correctness of the final integer answer, not writing style.
+You are a strict math verifier. Independently solve the question below, then check whether the candidate answer matches your answer.
 
 Question:
 {question}
 
-Candidate solution:
-{solution}
+Candidate answer: {candidate_answer}
 
-Output exactly one line in this exact format:
-TRUE|FALSE | CONFIDENCE: <number between 0 and 1>
+Solve the question yourself step by step (briefly), then output exactly one line:
+TRUE | CONFIDENCE: <number between 0 and 1>
+or
+FALSE | CONFIDENCE: <number between 0 and 1>
 
-Calibration guide: use 1.0 only if you solved the problem yourself and are fully certain of the answer; 0.8-0.9 if the solution's approach looks correct but you did not independently verify every step; 0.5-0.7 if the problem is hard or ambiguous and you are unsure; below 0.5 if the answer seems wrong but you are not certain.
+Output TRUE only if your independent solution matches the candidate answer exactly. Output FALSE otherwise.
+Calibration guide: 1.0 if you are fully certain of your own solution; 0.7-0.9 if you are fairly confident but did not check every case; 0.5 if unsure.
