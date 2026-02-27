@@ -205,6 +205,16 @@ def _parse_verdict(text: str) -> str:
     return "INCORRECT"
 
 
+def _parse_verdict_optional(text: str) -> str | None:
+    m = _VERDICT_RE.search(text)
+    if m:
+        return m.group(1).upper()
+    m2 = _BOOL_VERDICT_RE.search(text)
+    if m2:
+        return "CORRECT" if m2.group(1).upper() == "TRUE" else "INCORRECT"
+    return None
+
+
 def _parse_confidence(text: str) -> float:
     m = _CONFIDENCE_RE.search(text)
     if not m:
@@ -694,9 +704,15 @@ def main() -> None:
         role_name = str(role_cfg.get("_role_name", "role"))
         t0 = time.perf_counter()
         if debug_timing:
+            uses_api = _cfg_uses_openai(role_cfg)
+            parallel_info = (
+                f" api_max_parallel={int(role_cfg.get('api_max_parallel', 1))}"
+                if uses_api
+                else ""
+            )
             print(
                 f"[timing] start {role_name}: prompts={len(prompts)} max_new_tokens={max_new_tokens} "
-                f"batch_size={batch_size}",
+                f"batch_size={batch_size}{parallel_info}",
                 flush=True,
             )
         if _cfg_uses_openai(role_cfg):
@@ -1133,7 +1149,10 @@ def main() -> None:
                     for output in verify_outputs:
                         parsed_rows = _parse_batch_verify_output(output, num_solutions)
                         for s_idx in range(num_solutions):
-                            verdict, conf = parsed_rows.get(s_idx, ("INCORRECT", 0.5))
+                            # Exclude malformed verifier rows rather than counting them as INCORRECT.
+                            if s_idx not in parsed_rows:
+                                continue
+                            verdict, conf = parsed_rows[s_idx]
                             per_solution[s_idx]["raw_prompt"] = raw_prompt
                             per_solution[s_idx]["raw_outputs"].append(output)
                             per_solution[s_idx]["verdicts"].append(verdict)
@@ -1183,7 +1202,11 @@ def main() -> None:
                         if row["raw_prompt"] is None:
                             row["raw_prompt"] = job["raw_prompt"]
                         row["raw_outputs"].append(output)
-                        row["verdicts"].append(_parse_verdict(output))
+                        verdict = _parse_verdict_optional(output)
+                        if verdict is None:
+                            # Exclude malformed verifier outputs from scoring.
+                            continue
+                        row["verdicts"].append(verdict)
                         row["model_confidences"].append(_parse_confidence(output))
 
                 for s_idx in range(num_solutions):
@@ -1191,16 +1214,19 @@ def main() -> None:
                     model_confidences = list(per_solution[s_idx]["model_confidences"])
                     n_correct = verdicts.count("CORRECT")
                     n_incorrect = verdicts.count("INCORRECT")
-                    confidence = max(n_correct, n_incorrect) / max(1, verify_repeats)
-                    consistency_values.append(confidence)
-                    score_points[s_idx] += n_correct / max(1, verify_repeats)
-                    score_counts[s_idx] += 1
+                    parsed_repeats = len(verdicts)
+                    confidence = max(n_correct, n_incorrect) / max(1, parsed_repeats)
+                    if parsed_repeats > 0:
+                        consistency_values.append(confidence)
+                        score_points[s_idx] += n_correct / parsed_repeats
+                        score_counts[s_idx] += 1
                     verification_rows.append(
                         {
                             "solution_index": s_idx,
                             "verdicts": verdicts,
                             "model_confidences": model_confidences,
                             "counts": {"CORRECT": n_correct, "INCORRECT": n_incorrect},
+                            "parsed_repeats": parsed_repeats,
                             "confidence": confidence,
                             "model_confidence_mean": (
                                 sum(model_confidences) / len(model_confidences) if model_confidences else 0.5
@@ -1226,8 +1252,11 @@ def main() -> None:
                 group_scores_lists: List[List[float]] = [[] for _ in sampling_groups]
                 for s_idx in range(num_solutions):
                     grp_idx = solution_group_map[s_idx]
-                    n_c = per_solution[s_idx]["verdicts"].count("CORRECT")
-                    verify_score = n_c / max(1, verify_repeats)
+                    verdicts = per_solution[s_idx]["verdicts"]
+                    if not verdicts:
+                        continue
+                    n_c = verdicts.count("CORRECT")
+                    verify_score = n_c / len(verdicts)
                     group_scores_lists[grp_idx].append(verify_score)
                 group_verify_means = [
                     sum(gs) / len(gs) if gs else 0.0 for gs in group_scores_lists

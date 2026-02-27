@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
-from dataclasses import dataclass
+import random
+import re
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Any, Dict, List
 
 import torch
@@ -14,6 +20,9 @@ from trl import GRPOConfig, GRPOTrainer
 
 from grpo_math.data.gsm8k import load_gsm8k
 from grpo_math.data.reward import extract_final_answer_int_strict, extract_ground_truth_int
+
+_VERDICT_RE = re.compile(r"VERDICT:\s*(CORRECT|INCORRECT)", flags=re.IGNORECASE)
+_BOOL_VERDICT_RE = re.compile(r"\b(TRUE|FALSE)\b", flags=re.IGNORECASE)
 
 
 def _load_yaml(path: str) -> Dict[str, Any]:
@@ -32,6 +41,10 @@ def _torch_dtype(name: str) -> torch.dtype:
 
 
 def _make_dataset(cfg: Dict[str, Any], split: str, max_samples: int | None) -> Dataset:
+    data_source = str(cfg.get("data", {}).get("source", "gsm8k")).strip().lower()
+    if data_source == "pairwise_jsonl":
+        return _make_pairwise_jsonl_dataset(cfg, split=split, max_samples=max_samples)
+
     ex = load_gsm8k(
         dataset_name=cfg["data"]["dataset_name"],
         dataset_config=cfg["data"]["dataset_config"],
@@ -45,6 +58,212 @@ def _make_dataset(cfg: Dict[str, Any], split: str, max_samples: int | None) -> D
         prompt = template.format(question=r.question)
         rows.append({"prompt": prompt, "answer_text": r.answer_text})
     return Dataset.from_list(rows)
+
+
+def _make_pairwise_jsonl_dataset(cfg: Dict[str, Any], split: str, max_samples: int | None) -> Dataset:
+    data_cfg = cfg.get("data", {})
+    jsonl_path = Path(str(data_cfg["jsonl_path"]))
+    if not jsonl_path.exists():
+        raise FileNotFoundError(f"Pairwise JSONL not found: {jsonl_path}")
+
+    prompt_template = str(cfg.get("prompt", {}).get("template", "{question}"))
+    seed = int(cfg.get("seed", 1234))
+    eval_fraction = float(data_cfg.get("eval_fraction", 0.1))
+    eval_fraction = min(max(eval_fraction, 0.0), 0.95)
+
+    questions: List[str] = []
+    seen: set[str] = set()
+    with jsonl_path.open("r", encoding="utf-8") as f:
+        for raw in f:
+            raw = raw.strip()
+            if not raw:
+                continue
+            row = json.loads(raw)
+            q = str(row.get("question", "")).strip()
+            if not q:
+                continue
+            key = q.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            questions.append(q)
+
+    if not questions:
+        raise ValueError(f"No usable questions found in {jsonl_path}")
+
+    rng = random.Random(seed)
+    rng.shuffle(questions)
+    split_idx = max(1, int(len(questions) * (1.0 - eval_fraction)))
+    split_idx = min(split_idx, max(1, len(questions) - 1))
+    if split == "train":
+        selected = questions[:split_idx]
+    elif split == "eval":
+        selected = questions[split_idx:]
+    else:
+        raise ValueError(f"Unsupported split for pairwise_jsonl: {split!r} (use 'train' or 'eval')")
+
+    if max_samples is not None:
+        selected = selected[: max(0, int(max_samples))]
+
+    rows = [{"prompt": prompt_template.format(question=q), "question": q} for q in selected]
+    return Dataset.from_list(rows)
+
+
+def _extract_chat_content(body: Dict[str, Any]) -> str:
+    try:
+        msg = body["choices"][0]["message"]
+    except Exception as e:
+        raise KeyError(f"Missing choices/message in response: {e}")
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                txt = item.get("text")
+                if isinstance(txt, str):
+                    parts.append(txt)
+        if parts:
+            return "\n".join(parts).strip()
+    alt = msg.get("text")
+    if isinstance(alt, str):
+        return alt.strip()
+    out_txt = body.get("output_text")
+    if isinstance(out_txt, str):
+        return out_txt.strip()
+    raise KeyError("Could not parse textual content from chat completion response.")
+
+
+def _read_env_var_from_dotenv(var_name: str, dotenv_path: Path = Path(".env")) -> str | None:
+    if not dotenv_path.exists():
+        return None
+    try:
+        for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key != var_name:
+                continue
+            value = value.strip().strip('"').strip("'")
+            return value if value else None
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_api_key(role_cfg: Dict[str, Any]) -> str | None:
+    explicit = str(role_cfg.get("api_key", "")).strip()
+    if explicit:
+        return explicit
+    key_env = str(role_cfg.get("api_key_env", "")).strip()
+    if key_env:
+        return os.environ.get(key_env) or _read_env_var_from_dotenv(key_env)
+    for env_name in ("OPENAI_API_KEY", "OPENAI_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        val = os.environ.get(env_name) or _read_env_var_from_dotenv(env_name)
+        if val:
+            return val
+    return None
+
+
+def _parse_verdict(text: str) -> str:
+    m = _VERDICT_RE.search(text)
+    if m:
+        return m.group(1).upper()
+    m2 = _BOOL_VERDICT_RE.search(text)
+    if m2:
+        return "CORRECT" if m2.group(1).upper() == "TRUE" else "INCORRECT"
+    return "INCORRECT"
+
+
+def _openai_generate_texts(
+    *,
+    prompts: List[str],
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float,
+    top_p: float,
+    max_completion_tokens: int,
+    timeout_s: float,
+    max_tokens_param: str = "max_completion_tokens",
+    max_retries: int = 6,
+    initial_backoff_s: float = 1.0,
+) -> List[str]:
+    outputs: List[str] = []
+    for prompt in prompts:
+        payload: Dict[str, Any] = {
+            "model": model,
+            "temperature": temperature,
+            "top_p": top_p,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        payload[max_tokens_param] = max_completion_tokens
+        backoff_s = max(0.0, initial_backoff_s)
+        attempt = 0
+        while True:
+            attempt += 1
+            req = urllib.request.Request(
+                url=base_url.rstrip("/") + "/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                outputs.append(_extract_chat_content(body))
+                break
+            except urllib.error.HTTPError as e:
+                if e.code in (429, 500, 502, 503, 504) and attempt <= max_retries:
+                    time.sleep(backoff_s)
+                    backoff_s = min(backoff_s * 2.0, 30.0)
+                    continue
+                raise
+            except Exception:
+                if attempt <= max_retries:
+                    time.sleep(backoff_s)
+                    backoff_s = min(backoff_s * 2.0, 30.0)
+                    continue
+                raise
+    return outputs
+
+
+def _maybe_build_lora_config(cfg: Dict[str, Any]) -> Any | None:
+    train_cfg = cfg.get("train", {}) if isinstance(cfg.get("train"), dict) else {}
+    lora_cfg = train_cfg.get("lora", {}) if isinstance(train_cfg.get("lora"), dict) else {}
+    enabled = bool(lora_cfg.get("enabled", False))
+    if not enabled:
+        return None
+    try:
+        from peft import LoraConfig, TaskType
+    except Exception as e:
+        raise RuntimeError(
+            "LoRA is enabled but `peft` is not installed. Install with `pip install peft`."
+        ) from e
+
+    target_modules = lora_cfg.get("target_modules", "all-linear")
+    if isinstance(target_modules, str) and "," in target_modules:
+        target_modules = [x.strip() for x in target_modules.split(",") if x.strip()]
+
+    modules_to_save = lora_cfg.get("modules_to_save", None)
+    if isinstance(modules_to_save, str) and "," in modules_to_save:
+        modules_to_save = [x.strip() for x in modules_to_save.split(",") if x.strip()]
+
+    return LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=int(lora_cfg.get("r", 16)),
+        lora_alpha=int(lora_cfg.get("alpha", 32)),
+        lora_dropout=float(lora_cfg.get("dropout", 0.05)),
+        bias=str(lora_cfg.get("bias", "none")),
+        target_modules=target_modules,
+        modules_to_save=modules_to_save,
+    )
 
 
 def main() -> None:
@@ -78,6 +297,22 @@ def main() -> None:
 
     train_ds = _make_dataset(cfg, split=cfg["data"]["split_train"], max_samples=args.max_train_samples)
     eval_ds = _make_dataset(cfg, split=cfg["data"]["split_eval"], max_samples=args.max_eval_samples)
+    reward_mode = str(cfg.get("reward", {}).get("mode", "correctness")).strip().lower()
+
+    teacher_cfg = cfg.get("reward", {}).get("teacher", {})
+    teacher_template = str(
+        teacher_cfg.get(
+            "verify_prompt_template",
+            "Question:\n{question}\n\nCandidate answer:\n{candidate_answer}\n\nVERDICT: CORRECT or INCORRECT",
+        )
+    )
+    teacher_template_path = str(teacher_cfg.get("verify_prompt_template_path", "")).strip()
+    if teacher_template_path:
+        with open(teacher_template_path, "r", encoding="utf-8") as f:
+            teacher_template = f.read()
+    teacher_api_model = str(teacher_cfg.get("api_model", "gpt-4.1"))
+    teacher_base_url = str(teacher_cfg.get("api_base_url", "https://api.openai.com/v1"))
+    teacher_api_key = _resolve_api_key(teacher_cfg)
 
     # TRL GRPO calls reward funcs as:
     #   reward_func(prompts=..., completions=..., completion_ids=..., **reward_kwargs)
@@ -97,6 +332,30 @@ def main() -> None:
             out.append(1.0 if extract_final_answer_int_strict(c) is not None else 0.0)
         return out
 
+    def reward_verdict(*, prompts: List[str], completions: List[str], question: List[str], **_: Any) -> List[float]:
+        if not teacher_api_key:
+            raise RuntimeError(
+                "reward.mode=verdict requires reward.teacher.api_key/api_key_env (or OPENAI_API_KEY) to be set."
+            )
+        verify_prompts = [
+            teacher_template.format(question=q, candidate_answer=c)
+            for q, c in zip(question, completions, strict=True)
+        ]
+        judge_outputs = _openai_generate_texts(
+            prompts=verify_prompts,
+            model=teacher_api_model,
+            api_key=teacher_api_key,
+            base_url=teacher_base_url,
+            temperature=float(teacher_cfg.get("temperature", 0.0)),
+            top_p=float(teacher_cfg.get("top_p", 1.0)),
+            max_completion_tokens=int(teacher_cfg.get("max_new_tokens", 256)),
+            timeout_s=float(teacher_cfg.get("api_timeout_s", 120.0)),
+            max_tokens_param=str(teacher_cfg.get("api_max_tokens_param", "max_completion_tokens")),
+            max_retries=int(teacher_cfg.get("api_max_retries", 6)),
+            initial_backoff_s=float(teacher_cfg.get("api_backoff_initial_s", 1.0)),
+        )
+        return [1.0 if _parse_verdict(v) == "CORRECT" else 0.0 for v in judge_outputs]
+
     class _WandbMetricAliasesCallback(TrainerCallback):
         """
         TRL/Transformers logs per-reward-function eval metrics like:
@@ -108,10 +367,12 @@ def main() -> None:
         def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
             if not logs:
                 return
-            # Alias the "real" binary reward mean as eval/mean_reward for convenience.
-            rc_mean = logs.get("eval/rewards/reward_correct/mean")
-            if rc_mean is not None and "eval/mean_reward" not in logs:
-                logs["eval/mean_reward"] = rc_mean
+            # Alias the primary reward mean as eval/mean_reward for convenience.
+            for key in ("eval/rewards/reward_correct/mean", "eval/rewards/reward_verdict/mean"):
+                val = logs.get(key)
+                if val is not None and "eval/mean_reward" not in logs:
+                    logs["eval/mean_reward"] = val
+                    break
             # Alias format mean to eval/format_rate (it's a 0/1 rate).
             rf_mean = logs.get("eval/rewards/reward_format/mean")
             if rf_mean is not None and "eval/format_rate" not in logs:
@@ -134,6 +395,13 @@ def main() -> None:
         os.environ.setdefault("WANDB_PROJECT", wandb_project)
         if wandb_run_name:
             os.environ.setdefault("WANDB_NAME", str(wandb_run_name))
+    if reward_mode == "verdict":
+        reward_funcs = [reward_verdict, reward_format]
+    elif reward_mode == "correctness":
+        reward_funcs = [reward_correct, reward_format]
+    else:
+        raise ValueError(f"Unsupported reward.mode: {reward_mode} (use 'correctness' or 'verdict')")
+    peft_config = _maybe_build_lora_config(cfg)
     grpo_args = GRPOConfig(
         output_dir=out_dir,
         do_train=True,
@@ -144,7 +412,7 @@ def main() -> None:
         per_device_train_batch_size=per_device_bsz,
         per_device_eval_batch_size=1,
         gradient_accumulation_steps=int(cfg["train"].get("grad_accum_steps", 1)),
-        bf16=True if cfg["model"].get("torch_dtype", "bfloat16") in ("bf16", "bfloat16") else None,
+        bf16=True if cfg["model"].get("torch_dtype", "bfloat16") in ("bf16", "bfloat16") else False,
         gradient_checkpointing=bool(cfg["train"].get("gradient_checkpointing", True)),
         num_train_epochs=1,  # we drive by max_steps
         max_steps=int(args.max_steps) if args.max_steps is not None else int(cfg["train"]["steps"]),
@@ -173,12 +441,15 @@ def main() -> None:
 
     trainer = GRPOTrainer(
         model=model_name,
-        reward_funcs=[reward_correct, reward_format],
+        reward_funcs=reward_funcs,
         args=grpo_args,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         processing_class=tok,
+        peft_config=peft_config,
     )
+    if peft_config is not None and hasattr(trainer.model, "print_trainable_parameters"):
+        trainer.model.print_trainable_parameters()
     trainer.add_callback(_WandbMetricAliasesCallback())
 
     trainer.train()
