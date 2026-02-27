@@ -1,0 +1,22 @@
+Generate exactly one math question with moderate difficulty (not trivial) that has exactly one unique integer solution.
+
+Hard constraints:
+- Single-question output only.
+- The problem must have exactly one valid integer solution.
+- The final answer must be a single integer.
+- No proofs/existence-only questions.
+- No ambiguous wording.
+- No extremely large integers.
+- No edge-case tricks.
+- Keep arithmetic/algebra at early high-school contest level (2-4 steps of reasoning).
+- Include at least one nontrivial step (e.g., LCM+constraint, modular arithmetic, or multi-condition counting).
+- Avoid one-step questions like plain `2+2`, direct single LCM with no extra condition, or immediate formula recall.
+
+Good question types:
+- Linear equations with constraints
+- Number theory with 1-2 constraints (divisibility, gcd/lcm, modular arithmetic)
+- Counting/combinatorics with explicit bounds
+- Factorial trailing-zero or digit-sum tasks with an extra condition
+
+Output format (exactly one line):
+QUESTION: <the question text>

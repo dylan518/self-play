@@ -81,6 +81,7 @@ The 8 false positives are cases where the verifier said CORRECT but the solution
 
 **Pearson r = -0.314** (negative — confidence is inversely correlated with accuracy)
 
+
 The judge is most accurate when it expresses uncertainty (conf 0.5–0.7) and least accurate at conf=1.0. This means `mc=1.0` is not a reliable "obviously correct" signal — it's actually where errors concentrate.
 
 **`agg confidence` (consensus across 3 repeats) is always 1.0** — because judge temperature is set to 0.0, making all 3 repeats deterministic and identical. This field carries no information until judge temperature is raised (0.3–0.5 recommended).

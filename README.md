@@ -10,7 +10,7 @@ This repository describes a self-improving training system composed of three com
 
 The goal of the system is to iteratively improve the solver using self-generated tasks while maintaining a stable and reliable training signal.
 
-Unlike prior approaches that optimize for difficulty alone, this framework explicitly optimizes for **evaluation reliability**.
+Unlike prior approaches that optimize for difficulty alone, this framework explicitly optimizes for **evaluation reliability** and **strong-vs-weak separability**.
 
 ---
 
@@ -82,6 +82,67 @@ From these we compute evaluation stability statistics.
 
 # Reliability Metrics
 
+
+# Training Signals (how to update each component)
+
+This README so far defines the *question-generator* signal (reliability + separation). This section makes the update rules explicit.
+
+## Solver learning signal (primary)
+
+Prefer **absolute verification** over pairwise Elo as the main training signal whenever possible.
+
+- Let the judge/verifier return either a scalar score or a probability-like correctness confidence:
+  \(v(q,a)\in[0,1]\).
+- Define an outcome reward, e.g. \(r_{solve}=2v-1\) (maps to \([-1,1]\)).
+- For stability, use *within-question advantage normalization* (GRPO-style group baseline):
+
+\[
+A(q,a_k)=r_{solve}(q,a_k) - \frac{1}{M}\sum_{j=1}^M r_{solve}(q,a_j)
+\]
+
+This reduces variance and prevents the solver from only chasing "easy" questions.
+
+## Question generator learning signal (reliability-guided)
+
+The generator should be updated to propose questions that:
+1) produce **reliable evaluation** (high consistency / low ambiguity), and
+2) **separate** strong vs weak solver regimes (discriminative),
+3) are in the solver's **learnable band** (not trivial, not impossible).
+
+A practical recipe:
+
+### (A) Reliability / separability scoring (task quality)
+Compute on a candidate question \(q\):
+- \(R_{cons}(q)\): score consistency (low variance across repeated judging)
+- \(R_{sep}(q)\): strong-vs-weak separation (difference in mean verifier score between regimes)
+
+Use these as either:
+- **filters** (only keep tasks with \(R_{cons}>\tau_c\) and \(R_{sep}>\tau_s\)), and/or
+- **weights** (upweight tasks during training).
+
+### (B) Automated curriculum / learnability (AZR-style)
+Let \(\bar r(q)\) be the solver's average outcome reward across \(M\) attempts on \(q\).
+Reward the generator for tasks that fall into a "Goldilocks" region:
+
+\[
+r_{prop}(q)=\bar r(q)\,\big(1-\bar r(q)\big)
+\]
+
+This peaks when the solver succeeds about half the time and goes to 0 for trivial or impossible tasks.
+
+### (C) Combined generator reward
+One simple combined signal:
+
+\[
+r_G(q)= r_{prop}(q) + \lambda\,\max(0,R_{sep}(q)) + \mu\,R_{cons}(q)
+\]
+
+where \(\lambda,\mu\) are tuned so the system prioritizes *reliable, discriminative, learnable* tasks.
+
+## Notes on Elo / pairwise
+
+Pairwise Elo can be kept as a **diagnostic** (or a secondary signal), but it is typically noisier than absolute verification and is easier to Goodhart.
+
 For each question `q`, we compute reliability signals to measure how stable and discriminative the evaluation is.
 
 ## Score Consistency
@@ -118,17 +179,31 @@ These metrics approximate whether a question is **easy to verify**, meaning good
 
 ---
 
-# Generator Objective
+# Generator Objective (Current Oracle-Free Form)
 
-The generator is updated via reinforcement learning to maximize reliability:
+The generator is updated via reinforcement learning using an oracle-free approximate signal:
 
 \[
-R_G(q) = f(R_{\text{cons}}(q), R_{\text{sep}}(q), R_{\text{stab}}(q))
+R_G(q) = \alpha \cdot \underbrace{R_{\text{sep}}(q) \cdot A(q)}_{\text{approximate signal}}
+          - \beta \cdot \underbrace{v_{\text{strong}}(q)}_{\text{strong solve rate penalty}}
 \]
 
-This differs from difficulty-only objectives by explicitly favoring tasks that produce stable training signals.
+where:
 
-Over time, the generator shifts toward questions where evaluation is consistent and discriminative.
+- \(R_{\text{sep}}(q) = v_{\text{strong}}(q) - v_{\text{weak}}(q)\)
+- \(v_{\text{strong}}(q)\) is the judge-verified pass rate for the strong solver group
+- \(v_{\text{weak}}(q)\) is the judge-verified pass rate for the weak solver group
+- \(A(q)\) is **judge agreement** (not advantage), e.g. majority agreement across repeated judging
+
+Interpretation:
+
+- maximize separability between strong and weak groups
+- penalize high strong solve rate to avoid trivially easy questions
+- weight by judge agreement so noisy judgments contribute less
+
+This differs from difficulty-only objectives by explicitly favoring tasks that produce stable, discriminative training signals.
+
+Over time, the generator shifts toward questions where evaluation is consistent and discriminative, with an implied target difficulty controlled by the \(\alpha/\beta\) weighting ratio.
 
 ---
 
@@ -159,8 +234,8 @@ Each iteration:
 1. Sample questions from generator
 2. Sample multiple solver responses
 3. Evaluate responses with judge
-4. Compute reliability metrics
-5. Update generator using reliability reward
+4. Compute reliability metrics and agreement-weighted separability
+5. Update generator using \(R_G(q)\)
 6. Update solver using judged preferences
 
 This forms a closed loop:

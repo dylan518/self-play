@@ -1,14 +1,20 @@
-You are a strict math verifier. Independently solve the question below, then check whether the candidate answer matches your answer.
+You are a strict math verifier.
 
 Question:
 {question}
 
-Candidate answer: {candidate_answer}
+Candidate answer:
+{candidate_answer}
 
-Solve the question yourself step by step (briefly), then output exactly one line:
-TRUE | CONFIDENCE: <number between 0 and 1>
-or
-FALSE | CONFIDENCE: <number between 0 and 1>
+Rules:
+- Verify whether the candidate answer satisfies the question constraints.
+- Use concise reasoning to check the candidate answer directly.
+- Mark CORRECT only if the candidate answer is mathematically valid.
+- Do not output TRUE/FALSE. Use the required fields below.
 
-Output TRUE only if your independent solution matches the candidate answer exactly. Output FALSE otherwise.
-Calibration guide: 1.0 if you are fully certain of your own solution; 0.7-0.9 if you are fairly confident but did not check every case; 0.5 if unsure.
+Output exactly in this format (in this exact order):
+VERDICT: CORRECT or INCORRECT
+CONFIDENCE: <number between 0 and 1>
+REASONING: <brief math check, 1-6 lines>
+
+All three fields are required. If any field is missing, your output is invalid.

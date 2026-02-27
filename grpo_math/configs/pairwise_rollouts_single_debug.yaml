@@ -2,7 +2,7 @@ seed: 1234
 debug_timing: true
 
 pairwise:
-  num_questions: 20
+  num_questions: 1
   max_pairs_per_question: 0
   elo_k_factor: 24.0
   elo_initial_rating: 1000.0
@@ -12,7 +12,7 @@ generator:
   api_model: "gemini-2.5-flash"
   api_base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
   api_key_env: "GEMINI_API_KEY"
-  api_reasoning_effort: "medium"
+  api_reasoning_effort: "none"
   api_max_tokens_param: "max_tokens"
   api_timeout_s: 90
   api_min_interval_s: 2.0
@@ -21,12 +21,12 @@ generator:
   api_max_parallel: 1
   use_chat_template: false
   enable_thinking: false
-  prompt_template_path: "grpo_math/prompts/question_generator_prompt.txt"
-  temperature: 1.1
-  top_p: 0.9
-  max_new_tokens: 512
+  prompt_template_path: "grpo_math/prompts/question_generator_fixed_debug.txt"
+  temperature: 0.0
+  top_p: 1.0
+  max_new_tokens: 32
   batch_size: 1
-  max_retries_per_question: 20
+  max_retries_per_question: 10
 
 solver:
   api_provider: "openai"
@@ -39,17 +39,15 @@ solver:
   api_min_interval_s: 0.0
   api_max_retries: 8
   api_backoff_initial_s: 0.5
-  api_max_parallel: 100
+  api_max_parallel: 50
   use_chat_template: false
   enable_thinking: false
-  num_solutions_per_question: 10
+  num_solutions_per_question: 6
   sampling_groups:
-    # Group 0: strong — low temperature, focused sampling
-    - count: 5
+    - count: 3
       temperature: 0.2
       top_p: 0.85
-    # Group 1: weak — weaker model to create a real capability gap
-    - count: 5
+    - count: 3
       temperature: 2.0
       top_p: 1.0
       api_model: "gemini-2.0-flash"
@@ -71,34 +69,20 @@ judge:
   mode: "single_verify"
   batch_verify_all_solutions: false
   verify_prompt_template_path: "grpo_math/prompts/single_solution_verify_prompt.txt"
-  # verify_prompt_template_path takes priority; inline kept for reference only
-  verify_batch_prompt_template: |
-    You are a strict math verifier.
-    For each candidate answer, decide if it is mathematically correct for the question.
-    Output exactly one line per solution in this exact format:
-    SOLUTION_<index>: TRUE|FALSE
-
-    Question:
-    {question}
-
-    Candidate answers:
-    {candidate_answers_block}
-
+  prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
   api_provider: "openai"
   api_model: "gemini-2.5-flash"
   api_base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
   api_key_env: "GEMINI_API_KEY"
-  api_reasoning_effort: "none"
+  api_reasoning_effort: "medium"
   api_max_tokens_param: "max_tokens"
   api_timeout_s: 90
   api_min_interval_s: 0.0
   api_max_retries: 8
   api_backoff_initial_s: 0.5
-  api_max_parallel: 100
+  api_max_parallel: 50
   use_chat_template: false
   enable_thinking: false
-  prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
-  repeats_per_pair: 1
   repeats_per_solution: 3
   temperature: 0.0
   top_p: 1.0
@@ -107,7 +91,7 @@ judge:
 
 output:
   include_judge_traces: true
-  jsonl_path: "outputs/pairwise_rollouts_debug/samples_gemini25flash_v6_gap20.jsonl"
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_single_debug.jsonl"
   write_mode: "overwrite"
 
 strong_verifier:

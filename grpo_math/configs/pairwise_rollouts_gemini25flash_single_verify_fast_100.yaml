@@ -2,7 +2,7 @@ seed: 1234
 debug_timing: true
 
 pairwise:
-  num_questions: 20
+  num_questions: 100
   max_pairs_per_question: 0
   elo_k_factor: 24.0
   elo_initial_rating: 1000.0
@@ -44,11 +44,9 @@ solver:
   enable_thinking: false
   num_solutions_per_question: 10
   sampling_groups:
-    # Group 0: strong — low temperature, focused sampling
     - count: 5
       temperature: 0.2
       top_p: 0.85
-    # Group 1: weak — weaker model to create a real capability gap
     - count: 5
       temperature: 2.0
       top_p: 1.0
@@ -71,7 +69,6 @@ judge:
   mode: "single_verify"
   batch_verify_all_solutions: false
   verify_prompt_template_path: "grpo_math/prompts/single_solution_verify_prompt.txt"
-  # verify_prompt_template_path takes priority; inline kept for reference only
   verify_batch_prompt_template: |
     You are a strict math verifier.
     For each candidate answer, decide if it is mathematically correct for the question.
@@ -107,7 +104,7 @@ judge:
 
 output:
   include_judge_traces: true
-  jsonl_path: "outputs/pairwise_rollouts_debug/samples_gemini25flash_v6_gap20.jsonl"
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_gemini25flash_single_verify_fast_100.jsonl"
   write_mode: "overwrite"
 
 strong_verifier:

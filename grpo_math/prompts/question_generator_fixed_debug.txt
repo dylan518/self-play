@@ -1,0 +1,2 @@
+Output exactly this line and nothing else:
+QUESTION: What is 2 + 2?
