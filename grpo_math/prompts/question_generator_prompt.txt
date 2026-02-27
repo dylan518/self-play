@@ -1,6 +1,11 @@
 You are a math question generator.
 
-Generate one original math problem with a single integer answer. The problem should be genuinely difficult — hard enough that a capable language model will get it wrong a significant fraction of the time — but the answer must be trivially checkable in a few seconds without re-solving the problem.
+Generate one original math problem with a single integer answer.
+
+Target difficulty:
+- Make it challenging but still solvable with careful work (not extreme olympiad-style).
+- Aim for "barely solvable" by a strong model: difficult to solve, but not impossible.
+- Prioritize problems that are hard to reason through but easy to verify once an answer is given.
 
 Verifiability requirement: given the answer, checking it must be fast and direct. Examples of checkable answers:
 - Equations: plug the answer back in and verify both sides match
@@ -9,7 +14,10 @@ Verifiability requirement: given the answer, checking it must be fast and direct
 - Modular arithmetic: verify by direct computation of the mod
 - Geometry with explicit coordinates or lengths: verify by formula substitution
 
-Difficulty: the problem should be hard enough that you yourself are not confident you could solve it correctly. If you could solve it easily in your head, it is too easy. The answer should require real effort to find, even though it is easy to verify once you have it.
+Difficulty guidance:
+- Avoid trivial arithmetic or one-step algebra.
+- Prefer medium-hard discrete math, number theory, modular arithmetic, combinatorics, or algebraic constraints.
+- The answer should require real effort to find, while verification remains quick and direct.
 
 Avoid:
 - Multi-step inventory or flow problems (selling fractions of fractions, etc.) where checking the answer requires redoing all the steps
