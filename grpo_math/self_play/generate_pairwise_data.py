@@ -179,7 +179,9 @@ def _generate_texts(
 
 def _parse_question(text: str) -> str:
     m = _QUESTION_RE.search(text)
-    candidate = m.group(1).strip() if m else text.strip().splitlines()[0].strip()
+    # If the model does not emit an explicit "QUESTION:" tag, keep the full
+    # generated text (not just the first line) to avoid truncating multiline prompts.
+    candidate = m.group(1).strip() if m else text.strip()
     # Enforce question-only output even if the model leaks answer fields.
     candidate = re.sub(r"\n?\s*(ANSWER|FINAL_ANSWER)\s*:.*$", "", candidate, flags=re.IGNORECASE | re.DOTALL)
     return candidate.strip()

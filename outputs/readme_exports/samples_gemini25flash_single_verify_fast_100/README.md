@@ -1,0 +1,110 @@
+# Rollout Export
+
+- Source JSONL: `outputs/pairwise_rollouts_debug/samples_gemini25flash_single_verify_fast_100.jsonl`
+- Config: `/Users/dylanwilson/Documents/GitHub/self-play/Untitled/grpo_math/configs/pairwise_rollouts_gemini25flash_single_verify_fast_100.yaml`
+- Questions exported: `100`
+
+## Per-Question Files
+
+- `question_000.md`: Let $N$ be the smallest positive integer such that the number of positive divisors of $N
+- `question_001.md`: Let $P(x)$ be a polynomial of degree 4 with integer coefficients such that
+- `question_002.md`: Find the smallest positive integer $N$ such that $N$, $N+1$, $
+- `question_003.md`: Find the unique integer $N > 1$ such that the sum of the $N$-
+- `question_004.md`: Let $S_n$ be the smallest integer $k > n$ such that
+- `question_005.md`: Find the unique integer $N > 1000$ such that $N$
+- `question_006.md`: Let $P(x)$ be a polynomial of degree 4 such that $P
+- `question_007.md`: Let $P(x)$ be a polynomial of degree 10 with integer coefficients
+- `question_008.md`: Find the smallest positive integer $N$ such that $N$ is a perfect square, and
+- `question_009.md`: Let $P(x)$ be a polynomial of degree 4 such that $P(
+- `question_010.md`: Find the smallest positive integer $N$ such that $N$ can be expressed as the
+- `question_011.md`: Find the largest positive integer $N$ such that $N$ is a perfect square,
+- `question_012.md`: Let $S$ be the set of positive integers $n$ such that $n$ has
+- `question_013.md`: Find the unique positive integer $N$ such that $N$ is a perfect square,
+- `question_014.md`: Find the smallest positive integer $N$ such that $N$ is a perfect square, $
+- `question_015.md`: Find the unique positive integer $N$ such that $N$ is a perfect square
+- `question_016.md`: Find the smallest positive integer $N$ such that the number of positive integers $
+- `question_017.md`: Let $P(x)$ be a polynomial of degree 10 with integer coefficients such that
+- `question_018.md`: Let $S$ be the set of all positive integers $n$ such that $n
+- `question_019.md`: Find the unique integer $N > 1$ such that $N^3$ is
+- `question_020.md`: Let $S$ be the set of all positive integers $n$ such that $n$
+- `question_021.md`: Find the unique positive integer $N$ such that the equation $x^3 - y
+- `question_022.md`: Find the smallest positive integer $N$ such that the sum of the digits of $N
+- `question_023.md`: Find the smallest positive integer $N$ such that $N^2 + 101
+- `question_024.md`: Let $S$ be the set of all positive integers $n$ such that the
+- `question_025.md`: Find the smallest positive integer $N$ such that $N$ is a multiple of 1
+- `question_026.md`: Find the smallest positive integer $N$ such that $N^N \equiv 6
+- `question_027.md`: Find the smallest positive integer $N$ such that the sum of the squares of its
+- `question_028.md`: Find the smallest positive integer $N$ such that $N!$ is divisible by
+- `question_029.md`: Let $P(x)$ be a polynomial of degree 4 with integer coefficients such that $
+- `question_030.md`: Let $P(x)$ be a polynomial of degree 2024 with integer coefficients
+- `question_031.md`: Find the smallest positive integer $N$ such that the polynomial $P(x) = x
+- `question_032.md`: Find the smallest positive integer $N$ such that the sum of the digits of $
+- `question_033.md`: Find the smallest positive integer `N` such that the sum of the digits of `N`,
+- `question_034.md`: Find the smallest positive integer $N$ such that the sum of the digits of
+- `question_035.md`: Find the smallest positive integer $N$ such that $N$ is a perfect square, the
+- `question_036.md`: Let $S$ be the set of positive integers $n$ such that $
+- `question_037.md`: Find the smallest positive integer $N$ such that the sum of the squares of its divisors
+- `question_038.md`: Let $P(x)$ be a polynomial of degree 2024 such that $
+- `question_039.md`: Find the smallest positive integer $N$ such that the number of positive divisors of
+- `question_040.md`: Let $S$ be the set of all positive integers $n$ such that
+- `question_041.md`: Let $S$ be the set of integers $n > 1$ such
+- `question_042.md`: Find the smallest positive integer $N$ such that $N$ is not divisible
+- `question_043.md`: Let $S$ be the set of positive integers $n$ such that the fractional
+- `question_044.md`: Let $S$ be the set of all integers $k > 1$ such that the
+- `question_045.md`: Find the smallest positive integer `N` such that `N^N` is divisible by
+- `question_046.md`: Find the smallest positive integer $N$ such that $N$ is a perfect square,
+- `question_047.md`: Let $S$ be the set of positive integers $k$ for which the equation
+- `question_048.md`: Find the smallest positive integer $N$ such that $2^{2N}
+- `question_049.md`: Find the smallest positive integer $N$ such that the fractional part of $\sqrt{N
+- `question_050.md`: Find the unique positive integer $N$ such that $N = \sum_{k
+- `question_051.md`: Find the smallest positive integer $N$ such that if you take any $N$ points in
+- `question_052.md`: Find the smallest positive integer $N$ such that $N^2 \equiv 12
+- `question_053.md`: Let $S$ be the set of positive integers $n$ such that $n$ divides
+- `question_054.md`: Find the largest integer $N$ such that $N$ is a perfect square, $
+- `question_055.md`: Let $P(x)$ be a polynomial of degree 10 with integer coefficients. We
+- `question_056.md`: Find the smallest positive integer $N$ such that $N^2$ can
+- `question_057.md`: Find the smallest positive integer $N$ such that the sum of its distinct prime factors is equal
+- `question_058.md`: Let $P(x)$ be a polynomial of degree 10 with real coefficients
+- `question_059.md`: Find the smallest positive integer $n$ such that $n^{2023} +
+- `question_060.md`: Find the smallest positive integer $N$ such that $N$ has exactly 100
+- `question_061.md`: Let `S` be the set of all positive integers `n` such that the equation `
+- `question_062.md`: Find the unique integer $N$ which is a perfect square, a perfect cube
+- `question_063.md`: Find the smallest positive integer $N$ such that the set $\{1, 2, \
+- `question_064.md`: Find the smallest positive integer $N$ such that $N!$ is divisible by $
+- `question_065.md`: Find the smallest positive integer $N$ such that the set of distinct prime factors of $
+- `question_066.md`: Find the unique integer $N > 1$ such that $N$ is a
+- `question_067.md`: Find the smallest positive integer $N$ such that $N$ is divisible by 24
+- `question_068.md`: Let $S$ be the set of integers $n$ such that $1
+- `question_069.md`: Let $S$ be the set of all integers $n > 1$ such that $
+- `question_070.md`: Let $P(x)$ be a polynomial of degree 7 such that $P
+- `question_071.md`: Find the smallest positive integer $N$ such that the last four digits of $2
+- `question_072.md`: Find the smallest positive integer $n$ such that the fractional part of $\sqrt{n^
+- `question_073.md`: Find the unique integer $N$ such that $1 \le N \le
+- `question_074.md`: Let $S$ be the set of all positive integers $n$ such that $
+- `question_075.md`: Let $N$ be the smallest positive integer such that $N^2$ ends with the
+- `question_076.md`: Let $S(n)$ denote the sum of the digits of a positive integer $n$.
+- `question_077.md`: Find the smallest positive integer $N$ such that the sum of the digits of $N$
+- `question_078.md`: Find the smallest positive integer $N$ such that $N$ is a perfect square
+- `question_079.md`: Find the smallest positive integer $n$ such that $2^n$ contains the
+- `question_080.md`: Find the unique positive integer $N$ such that $N$ is the smallest integer
+- `question_081.md`: Let S be the set of all integers n > 1 such that n divides
+- `question_082.md`: Let $S$ be the set of all positive integers $n$ such that the fractional part
+- `question_083.md`: Find the smallest positive integer $N$ such that $N$ is a sum of three
+- `question_084.md`: Find the smallest positive integer $N$ such that $N$ has exactly 120
+- `question_085.md`: Find the smallest positive integer $N$ such that $N$ is divisible by 2
+- `question_086.md`: Let $P(x)$ be a polynomial of degree 4 such that $
+- `question_087.md`: Find the smallest positive integer $N$ such that $N$ is a perfect cube, and
+- `question_088.md`: Find the smallest positive integer $N$ such that the product of the first $N$
+- `question_089.md`: Find the smallest positive integer $N$ such that $N^3$ can
+- `question_090.md`: Let $S$ be the set of all integers $n > 1$ such that the
+- `question_091.md`: Find the smallest positive integer $N$ such that $N^3$ ends
+- `question_092.md`: Let $S$ be the set of positive integers $n$ such that $n$
+- `question_093.md`: Let $P(x)$ be a polynomial of degree 10 with integer coefficients such
+- `question_094.md`: Find the smallest positive integer $N$ such that $N$, $N+1
+- `question_095.md`: Let $P(x) = ax^2 + bx + c$ be
+- `question_096.md`: Let `f(n)` be the smallest positive integer `k` such that
+- `question_097.md`: Find the smallest positive integer $N$ such that $N^2$ is
+- `question_098.md`: Find the smallest positive integer N such that N is not divisible by 2 or 3
+- `question_099.md`: Find the smallest positive integer $N$ such that the sum of the squares of the first $
+
+Each per-question file includes full question text, prompts used, full solution continuations, and judge traces.
