@@ -80,7 +80,7 @@ judge:
   enable_thinking: false
   prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
   repeats_per_pair: 1
-  repeats_per_solution: 2
+  repeats_per_solution: 3
   temperature: 0.4
   top_p: 1.0
   max_new_tokens: 256
