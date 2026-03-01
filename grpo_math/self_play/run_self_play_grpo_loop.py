@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -30,6 +31,12 @@ def _dump_yaml(path: Path, payload: Dict[str, Any]) -> None:
 def _run(cmd: list[str], *, cwd: Path, env: Dict[str, str]) -> None:
     print(f"[loop] running: {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
+
+
+def _run_timed(cmd: list[str], *, cwd: Path, env: Dict[str, str]) -> float:
+    t0 = time.perf_counter()
+    _run(cmd, cwd=cwd, env=env)
+    return time.perf_counter() - t0
 
 
 def _count_jsonl_rows(path: Path) -> int:
@@ -80,6 +87,55 @@ def _latest_checkpoint(train_output_dir: Path) -> Path | None:
             return -1
 
     return sorted(checkpoints, key=_key)[-1]
+
+
+def _extract_train_perf_metrics(train_output_dir: Path) -> Dict[str, float]:
+    """
+    Extracts speed-oriented training metrics from TRL trainer_state.json if present.
+    Returns keys suitable for direct W&B logging.
+    """
+    out: Dict[str, float] = {}
+    ckpt = _latest_checkpoint(train_output_dir)
+    if ckpt is None:
+        return out
+    state_path = ckpt / "trainer_state.json"
+    if not state_path.exists():
+        return out
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return out
+    log_history = payload.get("log_history", [])
+    if not isinstance(log_history, list):
+        return out
+    for row in log_history:
+        if not isinstance(row, dict):
+            continue
+        step_time = row.get("step_time")
+        num_tokens = row.get("num_tokens")
+        if isinstance(step_time, (int, float)):
+            out["train/step_time_s"] = float(step_time)
+        if isinstance(num_tokens, (int, float)):
+            out["train/num_tokens"] = float(num_tokens)
+        if (
+            isinstance(step_time, (int, float))
+            and isinstance(num_tokens, (int, float))
+            and float(step_time) > 0
+        ):
+            out["train/tokens_per_s"] = float(num_tokens) / float(step_time)
+        eval_runtime = row.get("eval_runtime")
+        if isinstance(eval_runtime, (int, float)):
+            out["train/eval_runtime_s"] = float(eval_runtime)
+        eval_num_tokens = row.get("eval_num_tokens")
+        if isinstance(eval_num_tokens, (int, float)):
+            out["train/eval_num_tokens"] = float(eval_num_tokens)
+        if (
+            isinstance(eval_runtime, (int, float))
+            and isinstance(eval_num_tokens, (int, float))
+            and float(eval_runtime) > 0
+        ):
+            out["train/eval_tokens_per_s"] = float(eval_num_tokens) / float(eval_runtime)
+    return out
 
 
 def main() -> None:
@@ -180,6 +236,7 @@ def main() -> None:
     for cycle in range(1, args.cycles + 1):
         cycle_tag = f"cycle_{cycle:03d}"
         print(f"[loop] ===== {cycle_tag} =====", flush=True)
+        cycle_t0 = time.perf_counter()
 
         rollout_cfg = _load_yaml(rollout_template_path)
         cycle_jsonl = run_dir / f"{cycle_tag}_samples.jsonl"
@@ -190,7 +247,7 @@ def main() -> None:
         rollout_cfg_path = cfg_dir / f"{cycle_tag}_rollout.yaml"
         _dump_yaml(rollout_cfg_path, rollout_cfg)
 
-        _run(
+        rollout_generate_s = _run_timed(
             [
                 python,
                 "-m",
@@ -202,7 +259,7 @@ def main() -> None:
             env=env,
         )
 
-        _run(
+        rollout_export_s = _run_timed(
             [
                 python,
                 "-m",
@@ -244,6 +301,14 @@ def main() -> None:
                         "rollout/cycle": cycle,
                         "rollout/questions": rows,
                         "rollout/mean_solutions_per_question": mean_solutions,
+                        "perf/rollout_generate_s": rollout_generate_s,
+                        "perf/rollout_export_s": rollout_export_s,
+                        "perf/questions_per_s": (float(rows) / rollout_generate_s) if rollout_generate_s > 0 else 0.0,
+                        "perf/solutions_per_s": (
+                            float(rows * mean_solutions) / rollout_generate_s
+                        )
+                        if rollout_generate_s > 0
+                        else 0.0,
                     }
                 )
                 print("[loop] uploaded rollout artifacts to W&B", flush=True)
@@ -311,7 +376,7 @@ def main() -> None:
             train_cmd += ["--max_train_samples", str(args.max_train_samples)]
         if args.max_eval_samples is not None:
             train_cmd += ["--max_eval_samples", str(args.max_eval_samples)]
-        _run(train_cmd, cwd=root, env=env)
+        train_s = _run_timed(train_cmd, cwd=root, env=env)
 
         latest_ckpt = _latest_checkpoint(cycle_train_out)
         if latest_ckpt is not None:
@@ -319,6 +384,19 @@ def main() -> None:
             print(f"[loop] next cycle model: {current_policy_model}", flush=True)
         else:
             print("[loop] no checkpoint found; next cycle keeps template model", flush=True)
+
+        cycle_s = time.perf_counter() - cycle_t0
+        if wandb_run is not None:
+            try:
+                perf_payload: Dict[str, float] = {
+                    "rollout/cycle": cycle,
+                    "perf/train_s": train_s,
+                    "perf/cycle_s": cycle_s,
+                }
+                perf_payload.update(_extract_train_perf_metrics(cycle_train_out))
+                wandb_run.log(perf_payload)
+            except Exception as e:
+                print(f"[loop] failed to log perf metrics ({type(e).__name__}: {e})", flush=True)
 
     if wandb_run is not None:
         wandb_run.finish()

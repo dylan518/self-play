@@ -23,8 +23,7 @@ dist/
 .cache/
 
 # Experiment outputs
-outputs/
-!outputs/
+outputs/*
 !outputs/pairwise_rollouts_debug/
 !outputs/pairwise_rollouts_debug/*.jsonl
 checkpoints/
