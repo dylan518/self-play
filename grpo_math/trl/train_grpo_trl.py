@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 import torch
 import yaml
 from datasets import Dataset
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.trainer_callback import TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 
@@ -266,6 +266,49 @@ def _maybe_build_lora_config(cfg: Dict[str, Any]) -> Any | None:
     )
 
 
+def _load_adapter_model_if_needed(
+    model_name_or_path: str,
+    *,
+    torch_dtype: torch.dtype,
+    attn_impl: str,
+) -> tuple[Any, str, bool]:
+    """
+    Returns:
+      - model argument for GRPOTrainer (str model id/path or loaded model object)
+      - tokenizer source path/model id
+      - whether model_name_or_path was an adapter checkpoint
+    """
+    path = Path(str(model_name_or_path))
+    if not path.exists():
+        return model_name_or_path, model_name_or_path, False
+    adapter_cfg_path = path / "adapter_config.json"
+    model_cfg_path = path / "config.json"
+    # LoRA checkpoints saved by PEFT commonly have adapter_config.json but no full model config.
+    if not adapter_cfg_path.exists() or model_cfg_path.exists():
+        return model_name_or_path, model_name_or_path, False
+
+    adapter_cfg = json.loads(adapter_cfg_path.read_text(encoding="utf-8"))
+    base_model_name = str(adapter_cfg.get("base_model_name_or_path", "")).strip()
+    if not base_model_name:
+        raise ValueError(
+            f"Adapter checkpoint {path} is missing base_model_name_or_path in adapter_config.json"
+        )
+    try:
+        from peft import PeftModel
+    except Exception as e:
+        raise RuntimeError(
+            "Adapter checkpoint detected but `peft` is not installed. Install with `pip install peft`."
+        ) from e
+
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_model_name,
+        torch_dtype=torch_dtype,
+        attn_implementation=attn_impl,
+    )
+    adapter_model = PeftModel.from_pretrained(base_model, str(path), is_trainable=True)
+    return adapter_model, base_model_name, True
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=str, required=True)
@@ -277,7 +320,7 @@ def main() -> None:
 
     cfg = _load_yaml(args.config)
 
-    model_name = cfg["model"]["name_or_path"]
+    model_name = str(cfg["model"]["name_or_path"])
     use_flash = bool(cfg.get("model", {}).get("use_flash_attn", False))
     if use_flash:
         try:
@@ -290,7 +333,18 @@ def main() -> None:
     else:
         attn_impl = "sdpa"
 
-    tok = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+    model_for_trainer, tokenizer_source, loaded_adapter_checkpoint = _load_adapter_model_if_needed(
+        model_name,
+        torch_dtype=_torch_dtype(cfg["model"].get("torch_dtype", "bfloat16")),
+        attn_impl=attn_impl,
+    )
+    if loaded_adapter_checkpoint:
+        print(
+            f"[train] loading LoRA adapter checkpoint for continued training: {model_name}",
+            flush=True,
+        )
+
+    tok = AutoTokenizer.from_pretrained(tokenizer_source, use_fast=True)
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
     tok.padding_side = "left"
@@ -390,11 +444,17 @@ def main() -> None:
     wandb_enabled = bool(wandb_cfg.get("enabled", False))
     wandb_project = str(wandb_cfg.get("project", "grpo-math"))
     wandb_run_name = wandb_cfg.get("run_name", None)
+    wandb_group = wandb_cfg.get("group", None)
+    wandb_tags = wandb_cfg.get("tags", None)
     # TRL/Transformers uses wandb.init defaults unless WANDB_PROJECT is set.
     if wandb_enabled:
         os.environ.setdefault("WANDB_PROJECT", wandb_project)
         if wandb_run_name:
             os.environ.setdefault("WANDB_NAME", str(wandb_run_name))
+        if wandb_group:
+            os.environ.setdefault("WANDB_RUN_GROUP", str(wandb_group))
+        if isinstance(wandb_tags, list) and wandb_tags:
+            os.environ.setdefault("WANDB_TAGS", ",".join(str(x) for x in wandb_tags))
     if reward_mode == "verdict":
         reward_funcs = [reward_verdict, reward_format]
     elif reward_mode == "correctness":
@@ -402,6 +462,9 @@ def main() -> None:
     else:
         raise ValueError(f"Unsupported reward.mode: {reward_mode} (use 'correctness' or 'verdict')")
     peft_config = _maybe_build_lora_config(cfg)
+    # If model is already a loaded PEFT adapter checkpoint, do not wrap with a new peft_config.
+    if loaded_adapter_checkpoint:
+        peft_config = None
     grpo_args = GRPOConfig(
         output_dir=out_dir,
         do_train=True,
@@ -440,7 +503,7 @@ def main() -> None:
     )
 
     trainer = GRPOTrainer(
-        model=model_name,
+        model=model_for_trainer,
         reward_funcs=reward_funcs,
         args=grpo_args,
         train_dataset=train_ds,

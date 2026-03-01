@@ -201,6 +201,7 @@ def main() -> None:
         raise FileNotFoundError(f"Train config not found: {train_template_path}")
 
     tag = args.run_tag.strip() or dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    wandb_group = f"self-play-grpo-{tag}"
     run_dir = root / "outputs" / "self_play_grpo_loop" / tag
     cfg_dir = run_dir / "configs"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -219,7 +220,9 @@ def main() -> None:
             wandb_run = wandb.init(
                 project=os.environ.get("WANDB_PROJECT", "grpo-math"),
                 name=f"self-play-rollouts-{tag}",
+                group=wandb_group,
                 job_type="self-play-rollout-loop",
+                tags=["self-play", "rollout-loop", tag],
                 config={
                     "cycles": args.cycles,
                     "rollout_config": str(rollout_template_path),
@@ -359,6 +362,11 @@ def main() -> None:
         wandb_cfg = train_cfg["train"].setdefault("wandb", {})
         base_run_name = str(wandb_cfg.get("run_name", "self-play-grpo"))
         wandb_cfg["run_name"] = f"{base_run_name}-{tag}-{cycle_tag}"
+        wandb_cfg["group"] = wandb_group
+        base_tags = wandb_cfg.get("tags", [])
+        if not isinstance(base_tags, list):
+            base_tags = [str(base_tags)] if base_tags else []
+        wandb_cfg["tags"] = list(dict.fromkeys([*base_tags, "self-play", "grpo", tag, cycle_tag]))
 
         train_cfg_path = cfg_dir / f"{cycle_tag}_train.yaml"
         _dump_yaml(train_cfg_path, train_cfg)
