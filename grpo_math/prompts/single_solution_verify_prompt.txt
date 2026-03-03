@@ -10,6 +10,7 @@ Rules:
 - Verify whether the candidate answer satisfies the question constraints.
 - Use concise reasoning to check the candidate answer directly.
 - Mark CORRECT only if the candidate answer is mathematically valid.
+- If the problem is unclear/underspecified or you are unsure, mark INCORRECT.
 - Do not output TRUE/FALSE. Use the required fields below.
 - Do not revise your verdict inside the reasoning.
 

@@ -178,6 +178,22 @@ def _parse_verdict(text: str) -> str:
     return "INCORRECT"
 
 
+def _build_verdict_teacher_prompts(
+    *,
+    questions: List[str],
+    completions: List[str],
+    teacher_template: str,
+) -> tuple[List[int], List[str]]:
+    valid_indices: List[int] = []
+    verify_prompts: List[str] = []
+    for idx, (q, c) in enumerate(zip(questions, completions, strict=True)):
+        if extract_final_answer_int_strict(c) is None:
+            continue
+        valid_indices.append(idx)
+        verify_prompts.append(teacher_template.format(question=q, candidate_answer=c))
+    return valid_indices, verify_prompts
+
+
 def _openai_generate_texts(
     *,
     prompts: List[str],
@@ -391,24 +407,30 @@ def main() -> None:
             raise RuntimeError(
                 "reward.mode=verdict requires reward.teacher.api_key/api_key_env (or OPENAI_API_KEY) to be set."
             )
-        verify_prompts = [
-            teacher_template.format(question=q, candidate_answer=c)
-            for q, c in zip(question, completions, strict=True)
-        ]
-        judge_outputs = _openai_generate_texts(
-            prompts=verify_prompts,
-            model=teacher_api_model,
-            api_key=teacher_api_key,
-            base_url=teacher_base_url,
-            temperature=float(teacher_cfg.get("temperature", 0.0)),
-            top_p=float(teacher_cfg.get("top_p", 1.0)),
-            max_completion_tokens=int(teacher_cfg.get("max_new_tokens", 256)),
-            timeout_s=float(teacher_cfg.get("api_timeout_s", 120.0)),
-            max_tokens_param=str(teacher_cfg.get("api_max_tokens_param", "max_completion_tokens")),
-            max_retries=int(teacher_cfg.get("api_max_retries", 6)),
-            initial_backoff_s=float(teacher_cfg.get("api_backoff_initial_s", 1.0)),
+        # Directly assign 0 reward to unparseable completions and skip teacher API calls.
+        rewards: List[float] = [0.0 for _ in completions]
+        valid_indices, verify_prompts = _build_verdict_teacher_prompts(
+            questions=question,
+            completions=completions,
+            teacher_template=teacher_template,
         )
-        return [1.0 if _parse_verdict(v) == "CORRECT" else 0.0 for v in judge_outputs]
+        if verify_prompts:
+            judge_outputs = _openai_generate_texts(
+                prompts=verify_prompts,
+                model=teacher_api_model,
+                api_key=teacher_api_key,
+                base_url=teacher_base_url,
+                temperature=float(teacher_cfg.get("temperature", 0.0)),
+                top_p=float(teacher_cfg.get("top_p", 1.0)),
+                max_completion_tokens=int(teacher_cfg.get("max_new_tokens", 256)),
+                timeout_s=float(teacher_cfg.get("api_timeout_s", 120.0)),
+                max_tokens_param=str(teacher_cfg.get("api_max_tokens_param", "max_completion_tokens")),
+                max_retries=int(teacher_cfg.get("api_max_retries", 6)),
+                initial_backoff_s=float(teacher_cfg.get("api_backoff_initial_s", 1.0)),
+            )
+            for idx, out in zip(valid_indices, judge_outputs, strict=True):
+                rewards[idx] = 1.0 if _parse_verdict(out) == "CORRECT" else 0.0
+        return rewards
 
     class _WandbMetricAliasesCallback(TrainerCallback):
         """

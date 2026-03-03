@@ -35,6 +35,7 @@ _QUESTION_RE = re.compile(r"QUESTION:\s*(.+)", flags=re.DOTALL)
 _PREF_RE = re.compile(r"PREFERENCE:\s*(A|B)", flags=re.IGNORECASE)
 _VERDICT_RE = re.compile(r"VERDICT:\s*(CORRECT|INCORRECT)", flags=re.IGNORECASE)
 _BOOL_VERDICT_RE = re.compile(r"\b(TRUE|FALSE)\b", flags=re.IGNORECASE)
+_QUESTION_VERDICT_RE = re.compile(r"QUESTION_VERDICT:\s*(VALID|INVALID)", flags=re.IGNORECASE)
 _CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*(0(?:\.\d+)?|1(?:\.0+)?)", flags=re.IGNORECASE)
 _BATCH_VERIFY_LINE_RE = re.compile(
     r"SOLUTION_(\d+)\s*:\s*(CORRECT|INCORRECT|TRUE|FALSE)(?:\s*\|\s*CONFIDENCE\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?))?",
@@ -362,6 +363,141 @@ def _openai_oracle_answer(
         return None, None, f"{type(e).__name__}: {e}"
 
 
+def _openai_oracle_question_check(
+    *,
+    question: str,
+    model: str,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    timeout_s: float = 60.0,
+    max_tokens_param: str = "max_completion_tokens",
+    max_tokens: int = 256,
+) -> tuple[bool | None, str | None, str | None]:
+    prompt = (
+        "Assess whether this math question is well-posed and has a unique integer answer.\n"
+        "If it is ambiguous, inconsistent, or underspecified, mark INVALID.\n\n"
+        "Output exactly:\n"
+        "REASONING: <brief>\n"
+        "QUESTION_VERDICT: VALID or INVALID\n\n"
+        f"Question: {question}\n"
+    )
+    payload: Dict[str, Any] = {
+        "model": model,
+        "temperature": 0.0,
+        "messages": [
+            {"role": "system", "content": "You are a strict math question quality checker."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    payload[max_tokens_param] = max_tokens
+    req = urllib.request.Request(
+        url=base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8")
+        body = json.loads(raw)
+        content = _extract_chat_content(body)
+        m = _QUESTION_VERDICT_RE.search(content)
+        if m:
+            return m.group(1).upper() == "VALID", content, None
+        # Conservative fallback on malformed output.
+        return None, content, "Could not parse QUESTION_VERDICT."
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            detail = str(e)
+        return None, None, f"HTTPError: {e.code} {detail}"
+    except Exception as e:
+        return None, None, f"{type(e).__name__}: {e}"
+
+
+def _openai_oracle_verify_batch(
+    *,
+    question: str,
+    solutions: Sequence[str],
+    candidate_answers: Sequence[int | None],
+    model: str,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    timeout_s: float = 60.0,
+    max_tokens_param: str = "max_completion_tokens",
+    max_tokens: int = 1024,
+    prompt_template: str = "",
+) -> tuple[Dict[int, bool], str | None, str | None]:
+    num_solutions = len(solutions)
+    valid_indices = [i for i in range(num_solutions) if candidate_answers[i] is not None]
+    if not valid_indices:
+        return {}, None, None
+    if not prompt_template:
+        prompt_template = (
+            "You are a strict math verifier.\n"
+            "For each candidate solution, determine whether the FINAL_ANSWER is correct.\n"
+            "Output exactly one line per solution in this format:\n"
+            "SOLUTION_<index>: CORRECT|INCORRECT\n\n"
+            "Question:\n{question}\n\n"
+            "Candidate solutions:\n{solutions_block}\n"
+        )
+    solutions_block = "\n\n".join(
+        f"SOLUTION_{s_idx}:\n{solutions[s_idx]}" for s_idx in valid_indices
+    )
+    candidate_answers_block = "\n".join(
+        f"SOLUTION_{s_idx}: {candidate_answers[s_idx]}"
+        for s_idx in valid_indices
+    )
+    prompt = prompt_template.format(
+        question=question,
+        solutions_block=solutions_block,
+        candidate_answers_block=candidate_answers_block,
+    )
+    payload: Dict[str, Any] = {
+        "model": model,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "messages": [
+            {"role": "system", "content": "You are a precise math verifier."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    payload[max_tokens_param] = max_tokens
+    req = urllib.request.Request(
+        url=base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8")
+        body = json.loads(raw)
+        content = _extract_chat_content(body)
+        parsed = _parse_batch_verify_output(content, num_solutions)
+        verdicts: Dict[int, bool] = {}
+        for s_idx in valid_indices:
+            if s_idx not in parsed:
+                continue
+            verdicts[s_idx] = parsed[s_idx][0] == "CORRECT"
+        return verdicts, content, None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            detail = str(e)
+        return {}, None, f"HTTPError: {e.code} {detail}"
+    except Exception as e:
+        return {}, None, f"{type(e).__name__}: {e}"
+
+
 def _extract_chat_content(body: Dict[str, Any]) -> str:
     try:
         msg = body["choices"][0]["message"]
@@ -634,6 +770,26 @@ def main() -> None:
     strong_provider = str(strong_cfg.get("provider", "openai")).lower()
     strong_model = str(strong_cfg.get("model", "gpt-4.1"))
     strong_base_url = str(strong_cfg.get("base_url", "https://api.openai.com/v1"))
+    strong_mode = str(strong_cfg.get("mode", "solve")).strip().lower()
+    if strong_mode not in {"solve", "verify_batch"}:
+        raise ValueError(
+            f"Unsupported strong_verifier.mode: {strong_mode!r} (use 'solve' or 'verify_batch')."
+        )
+    strong_verify_batch_template = str(
+        strong_cfg.get(
+            "verify_batch_prompt_template",
+            (
+                "You are a strict math verifier.\n"
+                "For each candidate solution, determine whether the FINAL_ANSWER is correct.\n"
+                "Output exactly one line per solution in this format:\n"
+                "SOLUTION_<index>: CORRECT|INCORRECT\n\n"
+                "Question:\n{question}\n\n"
+                "Candidate answers:\n{candidate_answers_block}\n\n"
+                "Candidate solutions:\n{solutions_block}\n"
+            ),
+        )
+    )
+    strong_check_question_validity = bool(strong_cfg.get("check_question_validity", False))
 
     num_questions = int(pair_cfg.get("num_questions", 1))
     num_solutions = int(sol_cfg.get("num_solutions_per_question", 4))
@@ -941,6 +1097,7 @@ def main() -> None:
     # In single-verify mode, precompute verifier outputs for all questions in one call.
     precomputed_verify_raw_prompts_by_question: List[str] = []
     precomputed_verify_outputs_by_question: List[List[str]] = []
+    precomputed_verify_valid_solution_indices_by_question: List[List[int]] = []
     if (
         judge_mode == "single_verify"
         and bool(judge_cfg.get("batch_verify_all_solutions", False))
@@ -948,16 +1105,20 @@ def main() -> None:
     ):
         verify_jobs: List[Dict[str, Any]] = []
         precomputed_verify_raw_prompts_by_question = ["" for _ in range(len(questions))]
+        precomputed_verify_valid_solution_indices_by_question = [[] for _ in range(len(questions))]
         for q_idx, question in enumerate(questions):
             solver_outputs = solver_outputs_by_question[q_idx]
             solver_parsed_answers = [_parse_solver_final_answer(s_text) for s_text in solver_outputs]
+            valid_indices = [s_idx for s_idx, ans in enumerate(solver_parsed_answers) if ans is not None]
+            precomputed_verify_valid_solution_indices_by_question[q_idx] = valid_indices
+            if not valid_indices:
+                continue
             candidate_answers_block = "\n".join(
-                f"SOLUTION_{s_idx}: "
-                f"{solver_parsed_answers[s_idx] if solver_parsed_answers[s_idx] is not None else 'NONE'}"
-                for s_idx in range(num_solutions)
+                f"SOLUTION_{s_idx}: {solver_parsed_answers[s_idx]}"
+                for s_idx in valid_indices
             )
             solutions_block = "\n\n".join(
-                f"SOLUTION_{s_idx}:\n{s_text}" for s_idx, s_text in enumerate(solver_outputs)
+                f"SOLUTION_{s_idx}:\n{solver_outputs[s_idx]}" for s_idx in valid_indices
             )
             raw_prompt = verify_batch_template.format(
                 question=question,
@@ -1117,38 +1278,50 @@ def main() -> None:
                     if precomputed_verify_outputs_by_question:
                         raw_prompt = precomputed_verify_raw_prompts_by_question[q_idx - 1]
                         verify_outputs = precomputed_verify_outputs_by_question[q_idx - 1]
+                        valid_indices = precomputed_verify_valid_solution_indices_by_question[q_idx - 1]
                     else:
-                        candidate_answers_block = "\n".join(
-                            f"SOLUTION_{s_idx}: "
-                            f"{solver_parsed_answers[s_idx] if solver_parsed_answers[s_idx] is not None else 'NONE'}"
-                            for s_idx in range(num_solutions)
-                        )
-                        solutions_block = "\n\n".join(
-                            f"SOLUTION_{s_idx}:\n{s_text}" for s_idx, s_text in enumerate(solver_outputs)
-                        )
-                        raw_prompt = verify_batch_template.format(
-                            question=question,
-                            solutions_block=solutions_block,
-                            candidate_answers_block=candidate_answers_block,
-                        )
-                        formatted_prompt = _apply_chat_template(
-                            judge_bundle.tokenizer,
-                            raw_prompt,
-                            bool(judge_cfg.get("use_chat_template", False)),
-                            judge_cfg.get("enable_thinking", None),
-                        )
-                        verify_outputs = _role_generate_texts(
-                            judge_cfg,
-                            judge_bundle,
-                            [formatted_prompt] * verify_repeats,
-                            temperature=float(judge_cfg.get("temperature", 0.0)),
-                            top_p=float(judge_cfg.get("top_p", 0.9)),
-                            max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
-                            batch_size=int(judge_cfg.get("batch_size", 32)),
-                        )
+                        valid_indices = [
+                            s_idx for s_idx, ans in enumerate(solver_parsed_answers) if ans is not None
+                        ]
+                        if not valid_indices:
+                            verify_outputs = []
+                            raw_prompt = ""
+                        else:
+                            candidate_answers_block = "\n".join(
+                                f"SOLUTION_{s_idx}: {solver_parsed_answers[s_idx]}"
+                                for s_idx in valid_indices
+                            )
+                            solutions_block = "\n\n".join(
+                                f"SOLUTION_{s_idx}:\n{solver_outputs[s_idx]}" for s_idx in valid_indices
+                            )
+                            raw_prompt = verify_batch_template.format(
+                                question=question,
+                                solutions_block=solutions_block,
+                                candidate_answers_block=candidate_answers_block,
+                            )
+                            formatted_prompt = _apply_chat_template(
+                                judge_bundle.tokenizer,
+                                raw_prompt,
+                                bool(judge_cfg.get("use_chat_template", False)),
+                                judge_cfg.get("enable_thinking", None),
+                            )
+                            verify_outputs = _role_generate_texts(
+                                judge_cfg,
+                                judge_bundle,
+                                [formatted_prompt] * verify_repeats,
+                                temperature=float(judge_cfg.get("temperature", 0.0)),
+                                top_p=float(judge_cfg.get("top_p", 0.9)),
+                                max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
+                                batch_size=int(judge_cfg.get("batch_size", 32)),
+                            )
+                    for s_idx in range(num_solutions):
+                        if solver_parsed_answers[s_idx] is None:
+                            for _ in range(verify_repeats):
+                                per_solution[s_idx]["verdicts"].append("INCORRECT")
+                                per_solution[s_idx]["model_confidences"].append(0.0)
                     for output in verify_outputs:
                         parsed_rows = _parse_batch_verify_output(output, num_solutions)
-                        for s_idx in range(num_solutions):
+                        for s_idx in valid_indices:
                             # Exclude malformed verifier rows rather than counting them as INCORRECT.
                             if s_idx not in parsed_rows:
                                 continue
@@ -1281,8 +1454,12 @@ def main() -> None:
                         elo_ratings[i], elo_ratings[j] = _elo_update(elo_ratings[i], elo_ratings[j], s_i, elo_k)
 
             oracle_answer: int | None = None
+            oracle_solution_verdicts: Dict[int, bool] | None = None
             oracle_raw_response: str | None = None
             oracle_error: str | None = None
+            oracle_question_valid: bool | None = None
+            oracle_question_check_raw: str | None = None
+            oracle_question_check_error: str | None = None
             if strong_enabled and strong_provider == "openai":
                 api_key = (
                     _read_env_var_from_dotenv("OPENAI_API_KEY")
@@ -1293,17 +1470,51 @@ def main() -> None:
                 if not api_key:
                     oracle_error = "OPENAI_API_KEY (or OPENAI_KEY) is not set."
                 else:
-                    oracle_answer, oracle_raw_response, oracle_error = _openai_oracle_answer(
-                        question=question,
-                        model=strong_model,
-                        api_key=api_key,
-                        base_url=strong_base_url,
-                        timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
-                        max_tokens_param=str(
-                            strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
-                        ),
-                        max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
-                    )
+                    if strong_check_question_validity:
+                        (
+                            oracle_question_valid,
+                            oracle_question_check_raw,
+                            oracle_question_check_error,
+                        ) = _openai_oracle_question_check(
+                            question=question,
+                            model=strong_model,
+                            api_key=api_key,
+                            base_url=strong_base_url,
+                            timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
+                            max_tokens_param=str(
+                                strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
+                            ),
+                            max_tokens=int(strong_cfg.get("question_check_max_tokens", 256)),
+                        )
+                    if strong_mode == "verify_batch":
+                        oracle_solution_verdicts, oracle_raw_response, oracle_error = (
+                            _openai_oracle_verify_batch(
+                                question=question,
+                                solutions=solver_outputs,
+                                candidate_answers=solver_parsed_answers,
+                                model=strong_model,
+                                api_key=api_key,
+                                base_url=strong_base_url,
+                                timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
+                                max_tokens_param=str(
+                                    strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
+                                ),
+                                max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
+                                prompt_template=strong_verify_batch_template,
+                            )
+                        )
+                    else:
+                        oracle_answer, oracle_raw_response, oracle_error = _openai_oracle_answer(
+                            question=question,
+                            model=strong_model,
+                            api_key=api_key,
+                            base_url=strong_base_url,
+                            timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
+                            max_tokens_param=str(
+                                strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
+                            ),
+                            max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
+                        )
 
             row = {
                 "run_id": run_id,
@@ -1322,7 +1533,13 @@ def main() -> None:
                         **(
                             {
                                 "oracle_correct": (
-                                    (parsed is not None and oracle_answer is not None and parsed == oracle_answer)
+                                    (
+                                        False
+                                        if parsed is None
+                                        else oracle_solution_verdicts.get(s_idx, False)
+                                    )
+                                    if oracle_solution_verdicts is not None
+                                    else (parsed is not None and oracle_answer is not None and parsed == oracle_answer)
                                 )
                             }
                             if strong_enabled
@@ -1367,8 +1584,27 @@ def main() -> None:
                             "enabled": True,
                             "provider": strong_provider,
                             "model": strong_model,
+                            "mode": strong_mode,
                             "answer": oracle_answer,
                             "error": oracle_error,
+                            "question_check_enabled": strong_check_question_validity,
+                            "question_check_valid": oracle_question_valid,
+                            "question_check_error": oracle_question_check_error,
+                            **(
+                                {"question_check_raw_response": oracle_question_check_raw}
+                                if include_judge_traces and oracle_question_check_raw is not None
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "solution_verdicts": {
+                                        str(k): ("CORRECT" if v else "INCORRECT")
+                                        for k, v in (oracle_solution_verdicts or {}).items()
+                                    }
+                                }
+                                if oracle_solution_verdicts is not None
+                                else {}
+                            ),
                             **({"raw_response": oracle_raw_response} if include_judge_traces else {}),
                         }
                     }

@@ -42,12 +42,9 @@ solver:
   enable_thinking: false
   num_solutions_per_question: 10
   sampling_groups:
-    - count: 5
+    - count: 10
       temperature: 0.3
       top_p: 0.9
-    - count: 5
-      temperature: 1.2
-      top_p: 0.95
   prompt_template: |
     Question:
     {question}
@@ -81,7 +78,7 @@ judge:
   prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
   repeats_per_pair: 1
   repeats_per_solution: 3
-  temperature: 0.4
+  temperature: 0.6
   top_p: 1.0
   max_new_tokens: 256
   batch_size: 1
@@ -93,8 +90,11 @@ output:
 
 strong_verifier:
   enabled: true
+  mode: "verify_batch"
+  check_question_validity: true
   provider: "openai"
   model: "gpt-5.2"
   base_url: "https://api.openai.com/v1"
   timeout_s: 90
+  question_check_max_tokens: 256
   oracle_max_tokens: 1024

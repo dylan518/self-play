@@ -183,14 +183,19 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
     oracle_error_rows = 0
     oracle_solution_total = 0
     oracle_solution_correct = 0
+    oracle_question_check_enabled_rows = 0
+    oracle_question_check_valid_rows = 0
+    oracle_question_check_invalid_rows = 0
+    oracle_question_check_unknown_rows = 0
+    oracle_question_check_error_rows = 0
 
     verify_rows_total = 0
     verify_rows_unanimous = 0
     verify_rows_parsed = 0
+    verify_expected_votes_total = 0
     # Verifier-vs-oracle solution-level diagnostics (single-verify mode).
     verify_oracle_compared = 0
     verify_oracle_majority_compared = 0
-    verify_oracle_tie = 0
     verify_oracle_agree = 0
     verify_oracle_agree_correct = 0
     verify_oracle_agree_incorrect = 0
@@ -203,6 +208,11 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
     verify_oracle_pred_incorrect = 0
     verify_oracle_pred_incorrect_true = 0
     verify_oracle_pred_incorrect_false = 0
+    verify_oracle_unanimous_compared = 0
+    verify_oracle_unanimous_agree = 0
+    verify_oracle_non_unanimous_compared = 0
+    verify_oracle_non_unanimous_majority_compared = 0
+    verify_oracle_non_unanimous_agree = 0
 
     if not path.exists():
         return {}
@@ -234,6 +244,17 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
                     oracle_answer_rows += 1
                 if oracle.get("error"):
                     oracle_error_rows += 1
+                if oracle.get("question_check_enabled") is True:
+                    oracle_question_check_enabled_rows += 1
+                    qv = oracle.get("question_check_valid")
+                    if qv is True:
+                        oracle_question_check_valid_rows += 1
+                    elif qv is False:
+                        oracle_question_check_invalid_rows += 1
+                    else:
+                        oracle_question_check_unknown_rows += 1
+                    if oracle.get("question_check_error"):
+                        oracle_question_check_error_rows += 1
 
             sols = obj.get("solutions", [])
             if isinstance(sols, list):
@@ -248,6 +269,12 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
             verifs = obj.get("solution_verifications", [])
             if isinstance(verifs, list):
                 ver_by_idx: Dict[int, Dict[str, Any]] = {}
+                repeats_per_solution = None
+                reliability = obj.get("reliability", {})
+                if isinstance(reliability, dict):
+                    rps = reliability.get("repeats_per_solution")
+                    if isinstance(rps, (int, float)) and int(rps) > 0:
+                        repeats_per_solution = int(rps)
                 for v in verifs:
                     if not isinstance(v, dict):
                         continue
@@ -264,19 +291,20 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
                         continue
                     verify_rows_total += 1
                     verify_rows_parsed += n
+                    if repeats_per_solution is not None:
+                        verify_expected_votes_total += repeats_per_solution
                     if n_c == n or n_i == n:
                         verify_rows_unanimous += 1
 
                 # Oracle/verifier agreement metrics at solution level.
-                oracle_answer = obj.get("oracle", {}).get("answer") if isinstance(obj.get("oracle"), dict) else None
                 sols = obj.get("solutions", [])
-                if isinstance(sols, list) and isinstance(oracle_answer, int):
+                oracle_answer = obj.get("oracle", {}).get("answer") if isinstance(obj.get("oracle"), dict) else None
+                if isinstance(sols, list):
                     for s in sols:
                         if not isinstance(s, dict):
                             continue
                         sidx_raw = s.get("solution_index")
-                        parsed_ans = s.get("parsed_final_answer")
-                        if not isinstance(sidx_raw, (int, float)) or parsed_ans is None:
+                        if not isinstance(sidx_raw, (int, float)):
                             continue
                         v = ver_by_idx.get(int(sidx_raw))
                         if not isinstance(v, dict):
@@ -286,16 +314,31 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
                             continue
                         n_c = int(counts.get("CORRECT", 0) or 0)
                         n_i = int(counts.get("INCORRECT", 0) or 0)
+                        is_unanimous = (n_c > 0 and n_i == 0) or (n_i > 0 and n_c == 0)
                         if (n_c + n_i) <= 0:
                             continue
 
+                        oracle_correct_label = s.get("oracle_correct")
+                        parsed_ans = s.get("parsed_final_answer")
+                        oracle_is_correct: bool | None = None
+                        if isinstance(oracle_correct_label, bool):
+                            oracle_is_correct = oracle_correct_label
+                        elif isinstance(oracle_answer, int) and parsed_ans is not None:
+                            oracle_is_correct = int(parsed_ans) == int(oracle_answer)
+                        if oracle_is_correct is None:
+                            continue
+
                         verify_oracle_compared += 1
+                        if is_unanimous:
+                            verify_oracle_unanimous_compared += 1
+                        else:
+                            verify_oracle_non_unanimous_compared += 1
                         if n_c == n_i:
-                            verify_oracle_tie += 1
                             continue
                         verify_oracle_majority_compared += 1
+                        if not is_unanimous:
+                            verify_oracle_non_unanimous_majority_compared += 1
                         verifier_pred_correct = n_c > n_i
-                        oracle_is_correct = int(parsed_ans) == int(oracle_answer)
 
                         if verifier_pred_correct:
                             verify_oracle_pred_correct += 1
@@ -312,6 +355,10 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
 
                         if verifier_pred_correct == oracle_is_correct:
                             verify_oracle_agree += 1
+                            if is_unanimous:
+                                verify_oracle_unanimous_agree += 1
+                            else:
+                                verify_oracle_non_unanimous_agree += 1
                             if oracle_is_correct:
                                 verify_oracle_agree_correct += 1
                             else:
@@ -348,18 +395,37 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
     if oracle_solution_total > 0:
         out["rollout/oracle/solution_correct_rate"] = float(oracle_solution_correct) / float(oracle_solution_total)
         out["rollout/oracle/solution_scored"] = float(oracle_solution_total)
+    out["rollout/oracle/question_check_enabled_rows"] = float(oracle_question_check_enabled_rows)
+    out["rollout/oracle/question_check_valid_rows"] = float(oracle_question_check_valid_rows)
+    out["rollout/oracle/question_check_invalid_rows"] = float(oracle_question_check_invalid_rows)
+    out["rollout/oracle/question_check_unknown_rows"] = float(oracle_question_check_unknown_rows)
+    out["rollout/oracle/question_check_error_rows"] = float(oracle_question_check_error_rows)
+    if oracle_question_check_enabled_rows > 0:
+        out["rollout/oracle/question_check_valid_rate"] = (
+            float(oracle_question_check_valid_rows) / float(oracle_question_check_enabled_rows)
+        )
+        out["rollout/oracle/question_check_invalid_rate"] = (
+            float(oracle_question_check_invalid_rows) / float(oracle_question_check_enabled_rows)
+        )
+        out["rollout/oracle/question_check_unknown_rate"] = (
+            float(oracle_question_check_unknown_rows) / float(oracle_question_check_enabled_rows)
+        )
 
     out["rollout/verify/rows"] = float(verify_rows_total)
     if verify_rows_total > 0:
         out["rollout/verify/unanimous_frac"] = float(verify_rows_unanimous) / float(verify_rows_total)
     if verify_rows_parsed > 0 and verify_rows_total > 0:
         out["rollout/verify/parsed_votes_per_solution_mean"] = float(verify_rows_parsed) / float(verify_rows_total)
+    if verify_expected_votes_total > 0:
+        out["rollout/verify/parse_rate"] = float(verify_rows_parsed) / float(verify_expected_votes_total)
 
     out["rollout/verify_oracle/compared"] = float(verify_oracle_compared)
     out["rollout/verify_oracle/majority_compared"] = float(verify_oracle_majority_compared)
-    out["rollout/verify_oracle/tie"] = float(verify_oracle_tie)
-    if verify_oracle_compared > 0:
-        out["rollout/verify_oracle/tie_frac"] = float(verify_oracle_tie) / float(verify_oracle_compared)
+    out["rollout/verify_oracle/unanimous_compared"] = float(verify_oracle_unanimous_compared)
+    out["rollout/verify_oracle/non_unanimous_compared"] = float(verify_oracle_non_unanimous_compared)
+    out["rollout/verify_oracle/non_unanimous_majority_compared"] = float(
+        verify_oracle_non_unanimous_majority_compared
+    )
     if verify_oracle_majority_compared > 0:
         out["rollout/verify_oracle/accuracy"] = float(verify_oracle_agree) / float(verify_oracle_majority_compared)
         out["rollout/verify_oracle/agreement_correct_frac"] = (
@@ -376,6 +442,14 @@ def _infer_rollout_reliability_stats(path: Path) -> Dict[str, float]:
         )
         out["rollout/verify_oracle/disagree_marked_incorrect_frac"] = (
             float(verify_oracle_disagree_marked_incorrect) / float(verify_oracle_majority_compared)
+        )
+    if verify_oracle_unanimous_compared > 0:
+        out["rollout/verify_oracle/unanimous_accuracy"] = (
+            float(verify_oracle_unanimous_agree) / float(verify_oracle_unanimous_compared)
+        )
+    if verify_oracle_non_unanimous_majority_compared > 0:
+        out["rollout/verify_oracle/non_unanimous_accuracy"] = (
+            float(verify_oracle_non_unanimous_agree) / float(verify_oracle_non_unanimous_majority_compared)
         )
     if verify_oracle_pred_correct > 0:
         out["rollout/verify_oracle/precision_when_marked_correct"] = (
