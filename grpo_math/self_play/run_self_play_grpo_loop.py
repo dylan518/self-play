@@ -822,6 +822,13 @@ def main() -> None:
         train_cfg["data"]["split_train"] = "train"
         train_cfg["data"]["split_eval"] = "eval"
         train_cfg["data"]["eval_fraction"] = float(train_cfg["data"].get("eval_fraction", 0.2))
+        # Keep GRPO generation length aligned with rollout solver outputs to avoid
+        # clipping completions before FINAL_ANSWER, which collapses reward signal.
+        train_cfg.setdefault("rollout", {})
+        solver_cfg = rollout_cfg.get("solver", {}) if isinstance(rollout_cfg, dict) else {}
+        solver_max_new_tokens = int(solver_cfg.get("max_new_tokens", 0) or 0)
+        if solver_max_new_tokens > 0:
+            train_cfg["rollout"]["max_new_tokens"] = solver_max_new_tokens
         if args.use_rollout_strong_verifier_for_train:
             strong_cfg = rollout_cfg.get("strong_verifier", {}) if isinstance(rollout_cfg, dict) else {}
             if bool(strong_cfg.get("enabled", False)):
