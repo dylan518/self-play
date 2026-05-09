@@ -1,0 +1,74 @@
+{
+  "$schema": "/home/ubuntu/.cursor/plugins/cache/cursor-public/9333/d1cdb88a9eb33cf392395c87e3fd76419fc1010e/skills/orchestrate/schemas/plan.schema.json",
+  "goal": "Run self-play on cloud GPU locally, avoid Together, diagnose signal/stability, get RL working.",
+  "summary": "self-play on local cloud GPU: diagnose signal biases + drive a real GRPO loop and confirm RL learns",
+  "rootSlug": "self-play-rl",
+  "baseBranch": "main",
+  "prBase": "main",
+  "repoUrl": "https://github.com/[REDACTED]/self-play",
+  "selfAgentId": "bc-ef0ce4ec-5dbd-4b7c-964c-eede7cecd152",
+  "syncStateToGit": true,
+  "tasks": [
+    {
+      "name": "diagnose-signal-biases",
+      "type": "worker",
+      "scopedGoal": "Quantify the signal/stability biases that the project's TODO list (see `outputs/report5.md` 'TODO (Next)') flagged: verdict bias, parse bias, unanimity bias, sampling-group effects, and verifier-vs-oracle drift. Use the existing rollout JSONLs already committed under `outputs/pairwise_rollouts_debug/` (do NOT re-run any GPU rollout). Add a new diagnostic script at `tests/diagnose_signal_biases.py` that, given one or more rollout JSONL paths, computes and prints:\n\n  1. `verdict_bias`: marginal P(verdict=CORRECT) across all `solution_verifications[].counts`, broken out per-file and per-question. Compare to the oracle correct rate. Quantify the gap (positive bias = judge over-grants CORRECT).\n  2. `parse_bias`: per sampling group (group_index in solver) compute the parse rate of `FINAL_ANSWER` and the per-group oracle solve rate. Report whether weak-temperature groups disproportionately fail to parse (which would confound `R_sep`).\n  3. `unanimity_bias`: compare `verifier_pred_correct` vs `oracle_correct` for unanimous-CORRECT, unanimous-INCORRECT, and split votes; report precision/recall and a 2x2 confusion matrix per regime.\n  4. `group_effects`: compute mean `oracle_correct`, mean verifier-correct rate, parse rate, and `R_sep` per sampling group; rank groups.\n  5. Optional but high-value: also compute position bias if any `pairwise_judgments` rows are present (judge picking A vs B at random A/B positions).\n\nThe script must:\n- Accept `--jsonl path1 [path2 ...]`.\n- Print a clean text report to stdout AND write a Markdown summary to `outputs/diagnostics/signal_biases.md` (create directory).\n- Be runnable as `python tests/diagnose_signal_biases.py --jsonl <paths>` and from `python -m tests.diagnose_signal_biases`.\n- Tolerate older JSONL schemas (some files may lack `oracle`, `solution_verifications`, or `pairwise_judgments`); skip missing fields cleanly.\n\nAfter implementing the script:\n- Run it on the strongest existing artifact: `outputs/pairwise_rollouts_debug/samples_functional_smoke_50_answer_verify.jsonl` AND `outputs/pairwise_rollouts_debug/samples_functional_smoke_10_answer_verify.jsonl`. Commit the resulting `outputs/diagnostics/signal_biases.md` so the planner can read concrete numbers from the handoff.\n- Quote the headline findings in your handoff `## Notes` (e.g. 'judge over-grants CORRECT by +X%pp; weak group has Y%pp lower parse rate; non-unanimous accuracy is Z% vs unanimous W%').\n- DO NOT execute any rollout, training, or remote-GPU work. Pure offline analysis on artifacts already in the repo.\n\nLint/test discipline:\n- `ruff check .` must still pass after your changes (the repo CLAUDE.md flags it as the lint command).\n- Keep the script self-contained (stdlib + only what is already available; the project uses Python with `pyproject.toml`).",
+      "pathsAllowed": [
+        "tests/diagnose_signal_biases.py",
+        "outputs/diagnostics/**"
+      ],
+      "pathsForbidden": [
+        "grpo_math/**",
+        "outputs/pairwise_rollouts_debug/**",
+        "outputs/self_play_grpo_loop/**"
+      ],
+      "acceptance": [
+        "tests/diagnose_signal_biases.py exists and runs cleanly via `python tests/diagnose_signal_biases.py --jsonl outputs/pairwise_rollouts_debug/samples_functional_smoke_50_answer_verify.jsonl outputs/pairwise_rollouts_debug/samples_functional_smoke_10_answer_verify.jsonl`.",
+        "outputs/diagnostics/signal_biases.md is committed and contains numerical results for verdict bias, parse bias, unanimity bias, and per-group effects.",
+        "ruff check . passes.",
+        "Handoff `## Notes` quotes the headline numbers (verdict bias %pp, parse-rate per group, unanimous vs non-unanimous accuracy, group ranking by R_sep)."
+      ],
+      "verify": "## Setup\n- Fresh checkout of the worker's branch.\n- `pip install -e .` if needed (uv/pip).\n\n## Automated\n- `ruff check .` → passes.\n- `python tests/diagnose_signal_biases.py --jsonl outputs/pairwise_rollouts_debug/samples_functional_smoke_50_answer_verify.jsonl outputs/pairwise_rollouts_debug/samples_functional_smoke_10_answer_verify.jsonl` → exits 0, prints metrics, writes `outputs/diagnostics/signal_biases.md`.\n\n## Manual\n- Open `outputs/diagnostics/signal_biases.md` and confirm it has sections for verdict bias, parse bias, unanimity bias, group effects, with numbers (not placeholders).\n\n## Gotchas\n- Some older JSONL rows may have empty `solution_verifications`. Skip rather than error.\n- Don't re-run rollouts or write under `outputs/pairwise_rollouts_debug/`.",
+      "openPR": true,
+      "model": "gpt-5.5-high-fast",
+      "maxAttempts": 2
+    },
+    {
+      "name": "rl-loop-smoke",
+      "type": "worker",
+      "scopedGoal": "Drive a real self-play GRPO loop on the project's cloud GPU box (NOT inside the cloud-agent VM) and produce committed evidence that GRPO is improving the solver across cycles. Use the local-vLLM Llama-3.1-8B setup that `outputs/report5.md` already validates.\n\nExecution substrate (read this carefully — your VM has NO GPU; you MUST run via SSH):\n- The project owner's GPU box is reachable through SSH at `$SSH_HOST` as `$SSH_USER` with `$SSH_PASS` (use `sshpass -p \"$SSH_PASS\"` if interactive auth is needed; if `sshpass` isn't installed, `apt-get install -y sshpass` works in the cloud-agent VM).\n- The remote workspace already contains a clone of this repo at `$REMOTE_WORKSPACE_PATH`. SLURM is available via `$SLURM_PARTITION`, `$SLURM_GRES`, `$SLURM_ACCOUNT`.\n- Treat all four secrets (`SSH_HOST`, `SSH_USER`, `SSH_PASS`, `REMOTE_WORKSPACE_PATH`) as already present in your environment; do NOT echo them, do NOT paste them into commit messages, but DO use them via shell variable expansion.\n- All GRPO/vLLM work happens on the remote box. Your branch on this side carries the *evidence* (small JSONLs, markdown reports, summary numbers), not the model weights.\n\nWhat to actually do:\n1. From the cloud-agent VM, `git push` your current branch and on the remote box `git fetch && git checkout <branch>` so the remote runs the same code.\n2. Bring up vLLM on the remote box (GPU 1) serving `meta-llama/Llama-3.1-8B-Instruct` exactly as `outputs/report5.md` describes (`vllm serve ... --port 8001 --gpu-memory-utilization 0.45`). Wait for it to be healthy on `127.0.0.1:8001`.\n3. On GPU 0 of the remote box, run the closed-loop self-play GRPO driver: `python -m grpo_math.self_play.run_self_play_grpo_loop --rollout_config grpo_math/configs/pairwise_rollouts_llama31_8b_vllm_single_verify_fast.yaml --train_config grpo_math/configs/train_pairwise_verdict_llama31_8b_lora_local_teacher_smoke_trl.yaml --cycles 2 --max_steps 1 --max_train_samples 8 --max_eval_samples 2 --log_rollouts_to_wandb`.\n   - `cycles=2` is the cap to stay inside cloud-agent runtime; one cycle is roughly the rollout-then-train block proven in report5. Increase only if there is comfortable headroom and the first cycle finishes well under 30 minutes wall.\n   - `WANDB_API_KEY` should fall through from the existing env (the project uses `WANDBKEY` aliased to `WANDB_API_KEY` per report5).\n4. Pull back the cycle artifacts:\n   - Each cycle's `samples.jsonl` is small (≪1MB even at ~50 questions × 10 solutions) — copy `outputs/self_play_grpo_loop/<TAG>/cycle_*_samples.jsonl` into this repo at `outputs/self_play_grpo_loop_smoke/cycle_*_samples.jsonl`.\n   - Do NOT pull model checkpoints. They are too large; keep them on the remote box.\n5. Run the project's existing analyzer on each pulled cycle JSONL: `python tests/analyze_rollout_results.py outputs/self_play_grpo_loop_smoke/cycle_001_samples.jsonl` and the same for cycle_002. Capture the parse rate, oracle solve rate, R_sep mean, R_sep positive fraction, and verifier-vs-oracle precision/recall per cycle.\n6. Write a report at `outputs/self_play_grpo_loop_smoke/report.md` answering:\n   - Did the solver oracle solve rate improve cycle-over-cycle (cycle_001 → cycle_002)? Quote both numbers.\n   - Did `R_sep` move? Did the strong/weak gap collapse or hold?\n   - Did training metrics (`grpo/train/loss`, `grpo/train/grad_norm`, `grpo/train/reward`, `grpo/train/reward_std`, `grpo/train/kl`, `grpo/train/entropy`) look stable, or did they diverge / collapse?\n   - One paragraph honest assessment: 'RL is working / RL is not working / inconclusive at this scale, because <reason>'.\n7. Commit the pulled JSONLs, the report, and any small TRL trainer_state.json snippets you copied back, but NOT model weights or anything > a few MB.\n\nIf SSH/SLURM blocks you (no GRES, queue saturated, network drop, vLLM fails to start, OOM at 8B), STOP, do not retry blindly more than twice; instead write `outputs/self_play_grpo_loop_smoke/report.md` documenting exactly what failed and at which step, then hand off `Status: blocked` so the planner can replan around it. Do not invent numbers.\n\nQuality floor:\n- Honest reporting > optimistic reporting. If RL did not improve solver, say so plainly with the numbers.\n- No placeholder TODOs in the report — every section answered with what you actually observed.\n- Don't push or merge to main; keep everything on your branch.",
+      "pathsAllowed": [
+        "outputs/self_play_grpo_loop_smoke/**"
+      ],
+      "pathsForbidden": [
+        "grpo_math/**",
+        "tests/**",
+        "outputs/pairwise_rollouts_debug/**",
+        "outputs/readme_exports/**",
+        "outputs/report*.md",
+        "outputs/experiment_report*.md"
+      ],
+      "acceptance": [
+        "outputs/self_play_grpo_loop_smoke/cycle_001_samples.jsonl exists and is non-empty.",
+        "outputs/self_play_grpo_loop_smoke/report.md exists, includes per-cycle parse rate, oracle solve rate, R_sep mean and positive fraction, verifier accuracy, and a final paragraph stating whether RL is working with citation to the numbers above. If blocked end-to-end on env, the report still exists and documents the failure mode.",
+        "Cloud-agent runtime stays under cap; in-flight remote SLURM jobs are cancelled or short enough not to leak."
+      ],
+      "verify": "## Setup\n- Fresh checkout of the worker's branch.\n\n## Automated\n- `python tests/analyze_rollout_results.py outputs/self_play_grpo_loop_smoke/cycle_001_samples.jsonl` → exits 0 and matches the numbers quoted in `outputs/self_play_grpo_loop_smoke/report.md` for cycle 1.\n- Same for `cycle_002_samples.jsonl` if present.\n\n## Manual\n- Open `outputs/self_play_grpo_loop_smoke/report.md` and confirm it cites concrete numbers per cycle and ends with an honest 'RL is/isn't working' paragraph.\n\n## Gotchas\n- The verifier does not have remote-GPU access. It re-derives metrics from the committed JSONLs only; that's the contract.",
+      "openPR": true,
+      "model": "gpt-5.5-high-fast",
+      "maxAttempts": 2
+    },
+    {
+      "name": "verify-rl-loop-smoke",
+      "type": "verifier",
+      "verifies": "rl-loop-smoke",
+      "scopedGoal": "Re-derive the rl-loop-smoke metrics from the committed JSONLs without touching the remote GPU. Run `python tests/analyze_rollout_results.py outputs/self_play_grpo_loop_smoke/cycle_*_samples.jsonl` and check the worker's report numbers against your re-run output. Confirm the report's per-cycle parse rate, oracle solve rate, R_sep mean, R_sep positive fraction, and verifier accuracy match the analyzer's output within rounding. Confirm the final 'is RL working' paragraph cites these numbers and is internally consistent (e.g. it does not claim improvement when oracle solve rate decreased). If `cycle_002` is missing because the worker hit the cap or got blocked, accept `unit-test-verified` only if the report explicitly documents the blocker; otherwise mark `verifier-failed`.\n\nDo NOT re-run training or rollout; if metrics in the report cannot be reproduced from the JSONLs, that is a verifier failure (`verifier-failed`).",
+      "acceptance": [
+        "Verification section is one of: live-ui-verified | unit-test-verified | type-check-only | verifier-blocked | verifier-failed.",
+        "Execution section lists the analyze_rollout_results.py invocations actually run plus their numeric outputs.",
+        "Findings section cross-references each acceptance criterion of rl-loop-smoke with met/not-met/n-a evidence."
+      ],
+      "model": "claude-opus-4-7"
+    }
+  ]
+}
