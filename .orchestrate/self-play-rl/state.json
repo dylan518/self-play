@@ -32,14 +32,14 @@
       "agentId": null,
       "runId": null,
       "parentAgentId": null,
-      "status": "pending",
+      "status": "running",
       "resultStatus": null,
       "handoffPath": null,
-      "startedAt": null,
+      "startedAt": "2026-05-09T19:34:31.512Z",
       "finishedAt": null,
-      "lastUpdate": "2026-05-09T19:33:24.866Z",
+      "lastUpdate": "2026-05-09T19:34:31.512Z",
       "note": "respawned by self-planner (was error; attempts=1)",
-      "attempts": 1,
+      "attempts": 2,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
@@ -85,6 +85,10 @@
     {
       "at": "2026-05-09T19:33:25.487Z",
       "message": "rl-loop-smoke: respawned by self-planner (was error)"
+    },
+    {
+      "at": "2026-05-09T19:34:31.511Z",
+      "message": "diagnose-signal-biases: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct."
     }
   ]
 }
