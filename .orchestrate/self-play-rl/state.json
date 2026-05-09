@@ -68,6 +68,50 @@
       "prNumber": null,
       "failureMode": "unknown",
       "verification": null
+    },
+    {
+      "name": "qwen-verdict-rl-loop",
+      "type": "worker",
+      "branch": "orch/self-play-rl/qwen-verdict-rl-loop",
+      "startingRef": "main",
+      "dependsOn": [],
+      "agentId": null,
+      "runId": null,
+      "parentAgentId": null,
+      "status": "pending",
+      "resultStatus": null,
+      "handoffPath": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "lastUpdate": null,
+      "note": null,
+      "slackTs": null,
+      "prNumber": null,
+      "failureMode": null,
+      "verification": null
+    },
+    {
+      "name": "verify-qwen-verdict-rl-loop",
+      "type": "verifier",
+      "branch": "orch/self-play-rl/verify-qwen-verdict-rl-loop",
+      "startingRef": "orch/self-play-rl/qwen-verdict-rl-loop",
+      "dependsOn": [
+        "qwen-verdict-rl-loop"
+      ],
+      "agentId": null,
+      "runId": null,
+      "parentAgentId": null,
+      "status": "pending",
+      "resultStatus": null,
+      "handoffPath": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "lastUpdate": null,
+      "note": null,
+      "slackTs": null,
+      "prNumber": null,
+      "failureMode": null,
+      "verification": null
     }
   ],
   "attention": [
