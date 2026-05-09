@@ -37,13 +37,13 @@
       "handoffPath": "handoffs/rl-loop-smoke.md",
       "startedAt": "2026-05-09T19:44:19.342Z",
       "finishedAt": "2026-05-09T19:59:46.618Z",
-      "lastUpdate": "2026-05-09T19:59:46.618Z",
+      "lastUpdate": "2026-05-09T19:59:47.307Z",
       "note": "respawned by self-planner (was error; attempts=3)",
       "attempts": 4,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null
+      "verification": "not-verified"
     },
     {
       "name": "verify-rl-loop-smoke",
@@ -56,17 +56,18 @@
       "agentId": null,
       "runId": null,
       "parentAgentId": null,
-      "status": "pending",
+      "status": "running",
       "resultStatus": null,
       "handoffPath": null,
-      "startedAt": null,
+      "startedAt": "2026-05-09T19:59:53.633Z",
       "finishedAt": null,
-      "lastUpdate": null,
+      "lastUpdate": "2026-05-09T19:59:53.633Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null
+      "verification": null,
+      "attempts": 1
     }
   ],
   "attention": [
@@ -121,6 +122,10 @@
     {
       "at": "2026-05-09T19:48:43.249Z",
       "message": "diagnose-signal-biases: verification self-reported (unit-test-verified)"
+    },
+    {
+      "at": "2026-05-09T19:59:47.307Z",
+      "message": "rl-loop-smoke: verification self-reported (not-verified)"
     }
   ]
 }
