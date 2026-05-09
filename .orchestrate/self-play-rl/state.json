@@ -10,14 +10,14 @@
       "agentId": null,
       "runId": null,
       "parentAgentId": null,
-      "status": "pending",
+      "status": "running",
       "resultStatus": null,
       "handoffPath": null,
-      "startedAt": null,
+      "startedAt": "2026-05-09T19:39:00.095Z",
       "finishedAt": null,
-      "lastUpdate": "2026-05-09T19:38:18.574Z",
+      "lastUpdate": "2026-05-09T19:39:00.095Z",
       "note": "respawned by self-planner (was error; attempts=2)",
-      "attempts": 2,
+      "attempts": 3,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
@@ -97,6 +97,10 @@
     {
       "at": "2026-05-09T19:38:19.247Z",
       "message": "diagnose-signal-biases: respawned by self-planner (was error)"
+    },
+    {
+      "at": "2026-05-09T19:38:20.240Z",
+      "message": "rl-loop-smoke: respawned by self-planner (was error)"
     }
   ]
 }
