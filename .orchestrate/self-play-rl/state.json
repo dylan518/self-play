@@ -105,6 +105,10 @@
     {
       "at": "2026-05-09T19:39:08.553Z",
       "message": "diagnose-signal-biases: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct."
+    },
+    {
+      "at": "2026-05-09T19:39:16.801Z",
+      "message": "rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct."
     }
   ]
 }
