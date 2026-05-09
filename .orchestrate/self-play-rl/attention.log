@@ -13,3 +13,7 @@
 [2026-05-09T19:48:43.249Z] diagnose-signal-biases: verification self-reported (unit-test-verified)
 [2026-05-09T19:59:47.307Z] rl-loop-smoke: verification self-reported (not-verified)
 [2026-05-09T20:00:02.095Z] verify-rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [usage_limit_exceeded] Usage-based pricing required. Background Agent requires at least $2 remaining until your hard limit. Enable usage-based pricing and set a Spend Limit at https://www.cursor.co…
+[2026-05-09T21:00:26.665Z] qwen-verdict-rl-loop: SSE idle 329267ms, polled status=running; watchdog still waiting
+[2026-05-09T21:00:26.666Z] qwen-verdict-rl-loop: tool_call idle 329268ms; last=2026-05-09T20:54:57.398Z
+[2026-05-09T21:47:36.290Z] qwen-verdict-rl-loop: verification self-reported (not-verified)
+[2026-05-09T21:47:52.845Z] verify-qwen-verdict-rl-loop: spawn failed after 3 transient sub-attempts: l: [usage_limit_exceeded] You need to increase your hard limit. Background Agent requires at least $2 remaining until your hard limit. Manage it at https://www.cursor.com/dashboard?tab=settings.
