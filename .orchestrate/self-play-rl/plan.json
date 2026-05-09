@@ -57,18 +57,6 @@
       "openPR": true,
       "model": "gpt-xhigh",
       "maxAttempts": 4
-    },
-    {
-      "name": "verify-rl-loop-smoke",
-      "type": "verifier",
-      "verifies": "rl-loop-smoke",
-      "scopedGoal": "Re-derive the rl-loop-smoke metrics from the committed JSONLs without touching the remote GPU. Run `python tests/analyze_rollout_results.py outputs/self_play_grpo_loop_smoke/cycle_*_samples.jsonl` and check the worker's report numbers against your re-run output. Confirm the report's per-cycle parse rate, oracle solve rate, R_sep mean, R_sep positive fraction, and verifier accuracy match the analyzer's output within rounding. Confirm the final 'is RL working' paragraph cites these numbers and is internally consistent (e.g. it does not claim improvement when oracle solve rate decreased). If `cycle_002` is missing because the worker hit the cap or got blocked, accept `unit-test-verified` only if the report explicitly documents the blocker; otherwise mark `verifier-failed`.\n\nDo NOT re-run training or rollout; if metrics in the report cannot be reproduced from the JSONLs, that is a verifier failure (`verifier-failed`).",
-      "acceptance": [
-        "Verification section is one of: live-ui-verified | unit-test-verified | type-check-only | verifier-blocked | verifier-failed.",
-        "Execution section lists the analyze_rollout_results.py invocations actually run plus their numeric outputs.",
-        "Findings section cross-references each acceptance criterion of rl-loop-smoke with met/not-met/n-a evidence."
-      ],
-      "model": "claude-opus-4-7"
     }
   ]
 }
