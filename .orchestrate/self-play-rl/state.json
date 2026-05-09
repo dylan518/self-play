@@ -188,6 +188,10 @@
     {
       "at": "2026-05-09T21:47:36.290Z",
       "message": "qwen-verdict-rl-loop: verification self-reported (not-verified)"
+    },
+    {
+      "at": "2026-05-09T21:47:52.845Z",
+      "message": "verify-qwen-verdict-rl-loop: spawn failed after 3 transient sub-attempts: l: [usage_limit_exceeded] You need to increase your hard limit. Background Agent requires at least $2 remaining until your hard limit. Manage it at https://www.cursor.com/dashboard?tab=settings."
     }
   ]
 }
