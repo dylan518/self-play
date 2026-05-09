@@ -1,0 +1,74 @@
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen2.5-7B-Instruct"
+  torch_dtype: "bfloat16"
+  use_flash_attn: true
+
+data:
+  train_jsonl_paths:
+    - "outputs/pairwise_rollouts_debug/samples_functional_smoke_50_answer_verify.jsonl"
+  eval_jsonl_paths:
+    - "outputs/pairwise_rollouts_debug/samples_functional_smoke_50_answer_verify.jsonl"
+  max_train_samples: 16
+  max_eval_samples: 4
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    You must solve step by step, then output the final answer on its own line as:
+    FINAL_ANSWER: <number>
+
+rollout:
+  k: 4
+  temperature: 0.7
+  top_p: 0.95
+  max_new_tokens: 256
+
+verifier:
+  provider: "openai_compatible"
+  model: "gpt-4.1"
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "OPENAI_API_KEY"
+  prompt_version: "solver_verdict_grpo_v1"
+  cache_path: "outputs/verifier_cache/solver_verdict_grpo_qwen7b_gpu_smoke.jsonl"
+  temperature: 0.0
+  max_tokens: 16
+  max_retries: 3
+  timeout_s: 60.0
+  python_assisted: true
+  python_timeout_s: 5
+  prompt_template: |
+    You are verifying a math solution.
+
+    Question:
+    {question}
+
+    Solution:
+    {completion}
+
+    Return exactly one token: CORRECT, INCORRECT, INVALID, or UNCLEAR.
+
+train:
+  output_dir: "outputs/solver_verdict_grpo_qwen7b_gpu_smoke"
+  steps: 4
+  prompts_per_step: 8
+  grad_accum_steps: 1
+  lr: 4.0e-6
+  warmup_steps: 0
+  weight_decay: 0.1
+  max_grad_norm: 1.0
+  kl_beta: 0.005
+  gradient_checkpointing: true
+  log_every: 1
+  eval_every: 0
+  save_every: 2
+  wandb:
+    enabled: true
+    project: "grpo-math"
+    run_name: "solver-verdict-grpo-qwen7b-gpu-smoke-20260509-2043utc"
+  debug_rollouts:
+    enabled: true
+    max_prompts: 4
