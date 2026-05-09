@@ -81,6 +81,10 @@
     {
       "at": "2026-05-09T19:33:24.447Z",
       "message": "diagnose-signal-biases: respawned by self-planner (was error)"
+    },
+    {
+      "at": "2026-05-09T19:33:25.487Z",
+      "message": "rl-loop-smoke: respawned by self-planner (was error)"
     }
   ]
 }
