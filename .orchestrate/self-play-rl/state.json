@@ -83,13 +83,13 @@
       "handoffPath": "handoffs/qwen-verdict-rl-loop.md",
       "startedAt": "2026-05-09T20:43:05.400Z",
       "finishedAt": "2026-05-09T21:47:35.534Z",
-      "lastUpdate": "2026-05-09T21:47:35.535Z",
+      "lastUpdate": "2026-05-09T21:47:36.289Z",
       "note": null,
       "attempts": 1,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null
+      "verification": "not-verified"
     },
     {
       "name": "verify-qwen-verdict-rl-loop",
@@ -102,17 +102,18 @@
       "agentId": null,
       "runId": null,
       "parentAgentId": null,
-      "status": "pending",
+      "status": "running",
       "resultStatus": null,
       "handoffPath": null,
-      "startedAt": null,
+      "startedAt": "2026-05-09T21:47:44.478Z",
       "finishedAt": null,
-      "lastUpdate": null,
+      "lastUpdate": "2026-05-09T21:47:44.478Z",
       "note": null,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null
+      "verification": null,
+      "attempts": 1
     }
   ],
   "attention": [
@@ -183,6 +184,10 @@
     {
       "at": "2026-05-09T21:00:26.666Z",
       "message": "qwen-verdict-rl-loop: tool_call idle 329268ms; last=2026-05-09T20:54:57.398Z"
+    },
+    {
+      "at": "2026-05-09T21:47:36.290Z",
+      "message": "qwen-verdict-rl-loop: verification self-reported (not-verified)"
     }
   ]
 }
