@@ -31,7 +31,7 @@
       "verify": "## Setup\n- Fresh checkout of the worker's branch.\n- `pip install -e .` if needed (uv/pip).\n\n## Automated\n- `ruff check .` → passes.\n- `python tests/diagnose_signal_biases.py --jsonl outputs/pairwise_rollouts_debug/samples_functional_smoke_50_answer_verify.jsonl outputs/pairwise_rollouts_debug/samples_functional_smoke_10_answer_verify.jsonl` → exits 0, prints metrics, writes `outputs/diagnostics/signal_biases.md`.\n\n## Manual\n- Open `outputs/diagnostics/signal_biases.md` and confirm it has sections for verdict bias, parse bias, unanimity bias, group effects, with numbers (not placeholders).\n\n## Gotchas\n- Some older JSONL rows may have empty `solution_verifications`. Skip rather than error.\n- Don't re-run rollouts or write under `outputs/pairwise_rollouts_debug/`.",
       "openPR": true,
       "model": "gpt-5.3-codex-high-fast",
-      "maxAttempts": 2
+      "maxAttempts": 4
     },
     {
       "name": "rl-loop-smoke",
@@ -56,7 +56,7 @@
       "verify": "## Setup\n- Fresh checkout of the worker's branch.\n\n## Automated\n- `python tests/analyze_rollout_results.py outputs/self_play_grpo_loop_smoke/cycle_001_samples.jsonl` → exits 0 and matches the numbers quoted in `outputs/self_play_grpo_loop_smoke/report.md` for cycle 1.\n- Same for `cycle_002_samples.jsonl` if present.\n\n## Manual\n- Open `outputs/self_play_grpo_loop_smoke/report.md` and confirm it cites concrete numbers per cycle and ends with an honest 'RL is/isn't working' paragraph.\n\n## Gotchas\n- The verifier does not have remote-GPU access. It re-derives metrics from the committed JSONLs only; that's the contract.",
       "openPR": true,
       "model": "gpt-xhigh",
-      "maxAttempts": 2
+      "maxAttempts": 4
     },
     {
       "name": "verify-rl-loop-smoke",
