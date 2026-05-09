@@ -1,0 +1,15 @@
+[2026-05-09T19:32:26.033Z] diagnose-signal-biases: spawn failed after 3 transient sub-attempts: l: [invalid_model] Model 'gpt-5.5' does not match a known variant. Call GET /v1/models to list valid id+params combinations. run `bun cli.ts models --check` to re-probe the catalog against /v1/agents.
+[2026-05-09T19:32:33.787Z] rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [invalid_model] Model 'gpt-5.5' does not match a known variant. Call GET /v1/models to list valid id+params combinations. run `bun cli.ts models --check` to re-probe the catalog against /v1/agents.
+[2026-05-09T19:33:24.447Z] diagnose-signal-biases: respawned by self-planner (was error)
+[2026-05-09T19:33:25.487Z] rl-loop-smoke: respawned by self-planner (was error)
+[2026-05-09T19:34:31.511Z] diagnose-signal-biases: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct.
+[2026-05-09T19:34:40.084Z] rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct.
+[2026-05-09T19:38:19.247Z] diagnose-signal-biases: respawned by self-planner (was error)
+[2026-05-09T19:38:20.240Z] rl-loop-smoke: respawned by self-planner (was error)
+[2026-05-09T19:39:08.553Z] diagnose-signal-biases: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct.
+[2026-05-09T19:39:16.801Z] rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [validation_error] Failed to verify existence of branch 'main' in repository [REDACTED]/self-play. Please ensure the branch name is correct.
+[2026-05-09T19:43:59.874Z] diagnose-signal-biases: respawned by self-planner (was error)
+[2026-05-09T19:44:01.059Z] rl-loop-smoke: respawned by self-planner (was error)
+[2026-05-09T19:48:43.249Z] diagnose-signal-biases: verification self-reported (unit-test-verified)
+[2026-05-09T19:59:47.307Z] rl-loop-smoke: verification self-reported (not-verified)
+[2026-05-09T20:00:02.095Z] verify-rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [usage_limit_exceeded] Usage-based pricing required. Background Agent requires at least $2 remaining until your hard limit. Enable usage-based pricing and set a Spend Limit at https://www.cursor.co…
