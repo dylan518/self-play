@@ -126,6 +126,10 @@
     {
       "at": "2026-05-09T19:59:47.307Z",
       "message": "rl-loop-smoke: verification self-reported (not-verified)"
+    },
+    {
+      "at": "2026-05-09T20:00:02.095Z",
+      "message": "verify-rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [usage_limit_exceeded] Usage-based pricing required. Background Agent requires at least $2 remaining until your hard limit. Enable usage-based pricing and set a Spend Limit at https://www.cursor.co…"
     }
   ]
 }
