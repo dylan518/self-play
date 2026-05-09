@@ -1,0 +1,72 @@
+{
+  "rootSlug": "self-play-rl",
+  "tasks": [
+    {
+      "name": "diagnose-signal-biases",
+      "type": "worker",
+      "branch": "orch/self-play-rl/diagnose-signal-biases",
+      "startingRef": "main",
+      "dependsOn": [],
+      "agentId": null,
+      "runId": null,
+      "parentAgentId": null,
+      "status": "running",
+      "resultStatus": null,
+      "handoffPath": null,
+      "startedAt": "2026-05-09T19:32:17.985Z",
+      "finishedAt": null,
+      "lastUpdate": "2026-05-09T19:32:17.985Z",
+      "note": null,
+      "slackTs": null,
+      "prNumber": null,
+      "failureMode": null,
+      "verification": null,
+      "attempts": 1
+    },
+    {
+      "name": "rl-loop-smoke",
+      "type": "worker",
+      "branch": "orch/self-play-rl/rl-loop-smoke",
+      "startingRef": "main",
+      "dependsOn": [],
+      "agentId": null,
+      "runId": null,
+      "parentAgentId": null,
+      "status": "pending",
+      "resultStatus": null,
+      "handoffPath": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "lastUpdate": null,
+      "note": null,
+      "slackTs": null,
+      "prNumber": null,
+      "failureMode": null,
+      "verification": null
+    },
+    {
+      "name": "verify-rl-loop-smoke",
+      "type": "verifier",
+      "branch": "orch/self-play-rl/verify-rl-loop-smoke",
+      "startingRef": "orch/self-play-rl/rl-loop-smoke",
+      "dependsOn": [
+        "rl-loop-smoke"
+      ],
+      "agentId": null,
+      "runId": null,
+      "parentAgentId": null,
+      "status": "pending",
+      "resultStatus": null,
+      "handoffPath": null,
+      "startedAt": null,
+      "finishedAt": null,
+      "lastUpdate": null,
+      "note": null,
+      "slackTs": null,
+      "prNumber": null,
+      "failureMode": null,
+      "verification": null
+    }
+  ],
+  "attention": []
+}
