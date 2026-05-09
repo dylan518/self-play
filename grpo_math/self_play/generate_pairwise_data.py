@@ -7,16 +7,13 @@ import json
 import os
 import random
 import re
-import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
-from functools import lru_cache
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Dict, Iterable, List, Sequence
 
 import yaml
 from tqdm import tqdm
@@ -32,27 +29,14 @@ except Exception:
     AutoTokenizer = None  # type: ignore[assignment]
 
 from grpo_math.data.reward import extract_final_answer_int_strict
-from grpo_math.self_play.question_bank import render_question_bank_block_from_config
-from grpo_math.self_play.question_rewards import compute_question_reward
-from grpo_math.self_play.rewards import (
-    SCHEMA_VERSION,
-    VERDICT_CORRECT,
-    VERDICT_INCORRECT,
-    VERDICT_UNCLEAR,
-    score_solver_completions,
-)
-from grpo_math.self_play.verifier import run_python_verification_probe
 
 
 _QUESTION_RE = re.compile(r"QUESTION:\s*(.+)", flags=re.DOTALL)
 _PREF_RE = re.compile(r"PREFERENCE:\s*(A|B)", flags=re.IGNORECASE)
-_VERDICT_RE = re.compile(
-    r"^\s*VERDICT\s*:\s*(CORRECT|INCORRECT|INVALID|UNCLEAR)\b",
-    flags=re.IGNORECASE | re.MULTILINE,
-)
+_VERDICT_RE = re.compile(r"VERDICT:\s*(CORRECT|INCORRECT)", flags=re.IGNORECASE)
 _BOOL_VERDICT_RE = re.compile(r"\b(TRUE|FALSE)\b", flags=re.IGNORECASE)
+_QUESTION_VERDICT_RE = re.compile(r"QUESTION_VERDICT:\s*(VALID|INVALID)", flags=re.IGNORECASE)
 _CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*(0(?:\.\d+)?|1(?:\.0+)?)", flags=re.IGNORECASE)
-_FINAL_ANSWER_TEXT_RE = re.compile(r"FINAL_ANSWER\s*:\s*(.+?)(?:\n|$)", flags=re.IGNORECASE)
 _BATCH_VERIFY_LINE_RE = re.compile(
     r"SOLUTION_(\d+)\s*:\s*(CORRECT|INCORRECT|TRUE|FALSE)(?:\s*\|\s*CONFIDENCE\s*:\s*(0(?:\.\d+)?|1(?:\.0+)?))?",
     flags=re.IGNORECASE,
@@ -200,12 +184,7 @@ def _parse_question(text: str) -> str:
     # generated text (not just the first line) to avoid truncating multiline prompts.
     candidate = m.group(1).strip() if m else text.strip()
     # Enforce question-only output even if the model leaks answer fields.
-    candidate = re.sub(
-        r"\n?\s*(VERIFICATION\s+IDEA|ANSWER|FINAL_ANSWER)\s*:.*$",
-        "",
-        candidate,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
+    candidate = re.sub(r"\n?\s*(ANSWER|FINAL_ANSWER)\s*:.*$", "", candidate, flags=re.IGNORECASE | re.DOTALL)
     return candidate.strip()
 
 
@@ -218,13 +197,23 @@ def _parse_preference(text: str) -> str:
 
 
 def _parse_verdict(text: str) -> str:
-    matches = list(_VERDICT_RE.finditer(text))
-    if matches:
-        return matches[-1].group(1).upper()
+    m = _VERDICT_RE.search(text)
+    if m:
+        return m.group(1).upper()
     m2 = _BOOL_VERDICT_RE.search(text)
     if m2:
         return "CORRECT" if m2.group(1).upper() == "TRUE" else "INCORRECT"
-    return "UNCLEAR"
+    return "INCORRECT"
+
+
+def _parse_verdict_optional(text: str) -> str | None:
+    m = _VERDICT_RE.search(text)
+    if m:
+        return m.group(1).upper()
+    m2 = _BOOL_VERDICT_RE.search(text)
+    if m2:
+        return "CORRECT" if m2.group(1).upper() == "TRUE" else "INCORRECT"
+    return None
 
 
 def _parse_confidence(text: str) -> float:
@@ -250,38 +239,25 @@ def _parse_batch_verify_output(text: str, num_solutions: int) -> Dict[int, tuple
     return out
 
 
-def _parse_solver_final_answer(text: str) -> str | None:
-    search_text = text
-    if "[Final]" in text:
-        search_text = text.rsplit("[Final]", 1)[1]
-    final_matches = _FINAL_ANSWER_TEXT_RE.findall(search_text)
-    if final_matches:
-        answer = final_matches[-1].strip()
-        if answer and answer.lower().strip(" .") not in {"<final answer>", "final answer"}:
-            return answer
-    fallback_patterns = [
-        r"(?:the\s+)?answer\s+is\s+(-?\d+(?:/\d+)?)\b",
-        r"(?:the\s+)?final\s+answer\s+is\s+(-?\d+(?:/\d+)?)\b",
-    ]
-    for pattern in fallback_patterns:
-        matches = re.findall(pattern, search_text, flags=re.IGNORECASE)
-        if matches:
-            return str(matches[-1]).strip()
+def _parse_solver_final_answer(text: str) -> int | None:
+    # Prefer strict training format when present.
+    strict = extract_final_answer_int_strict(text)
+    if strict is not None:
+        return strict
+    # Fallbacks for analysis-time metadata in pairwise rollouts.
+    boxed_matches = _BOXED_INT_RE.findall(text)
+    if boxed_matches:
+        return int(boxed_matches[-1])
+    final_text_matches = _FINAL_TEXT_INT_RE.findall(text)
+    if final_text_matches:
+        return int(final_text_matches[-1])
+    answer_is_matches = _ANSWER_IS_INT_RE.findall(text)
+    if answer_is_matches:
+        return int(answer_is_matches[-1])
+    equals_eol_matches = _EQUALS_INT_EOL_RE.findall(text)
+    if equals_eol_matches:
+        return int(equals_eol_matches[-1])
     return None
-
-
-def _append_python_tool_result(
-    prompt: str,
-    *,
-    question: str,
-    solution: str,
-    enabled: bool,
-    timeout_s: float,
-) -> str:
-    if not enabled:
-        return prompt
-    tool_result = run_python_verification_probe(question, solution, timeout_s=timeout_s)
-    return prompt.rstrip() + "\n\nPython tool result:\n" + tool_result + "\n"
 
 
 def _looks_like_question_only(raw_text: str, parsed_question: str) -> bool:
@@ -387,19 +363,149 @@ def _openai_oracle_answer(
         return None, None, f"{type(e).__name__}: {e}"
 
 
-def _extract_chat_content(body: Dict[str, Any], *, include_reasoning: bool = False) -> str:
+def _openai_oracle_question_check(
+    *,
+    question: str,
+    model: str,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    timeout_s: float = 60.0,
+    max_tokens_param: str = "max_completion_tokens",
+    max_tokens: int = 256,
+) -> tuple[bool | None, str | None, str | None]:
+    prompt = (
+        "Assess whether this math question is well-posed and has a unique integer answer.\n"
+        "If it is ambiguous, inconsistent, or underspecified, mark INVALID.\n\n"
+        "Output exactly:\n"
+        "REASONING: <brief>\n"
+        "QUESTION_VERDICT: VALID or INVALID\n\n"
+        f"Question: {question}\n"
+    )
+    payload: Dict[str, Any] = {
+        "model": model,
+        "temperature": 0.0,
+        "messages": [
+            {"role": "system", "content": "You are a strict math question quality checker."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    payload[max_tokens_param] = max_tokens
+    req = urllib.request.Request(
+        url=base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8")
+        body = json.loads(raw)
+        content = _extract_chat_content(body)
+        m = _QUESTION_VERDICT_RE.search(content)
+        if m:
+            return m.group(1).upper() == "VALID", content, None
+        # Conservative fallback on malformed output.
+        return None, content, "Could not parse QUESTION_VERDICT."
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            detail = str(e)
+        return None, None, f"HTTPError: {e.code} {detail}"
+    except Exception as e:
+        return None, None, f"{type(e).__name__}: {e}"
+
+
+def _openai_oracle_verify_batch(
+    *,
+    question: str,
+    solutions: Sequence[str],
+    candidate_answers: Sequence[int | None],
+    model: str,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    timeout_s: float = 60.0,
+    max_tokens_param: str = "max_completion_tokens",
+    max_tokens: int = 1024,
+    prompt_template: str = "",
+) -> tuple[Dict[int, bool], str | None, str | None]:
+    num_solutions = len(solutions)
+    valid_indices = [i for i in range(num_solutions) if candidate_answers[i] is not None]
+    if not valid_indices:
+        return {}, None, None
+    if not prompt_template:
+        prompt_template = (
+            "You are a strict math verifier.\n"
+            "For each candidate solution, determine whether the FINAL_ANSWER is correct.\n"
+            "Output exactly one line per solution in this format:\n"
+            "SOLUTION_<index>: CORRECT|INCORRECT\n\n"
+            "Question:\n{question}\n\n"
+            "Candidate solutions:\n{solutions_block}\n"
+        )
+    solutions_block = "\n\n".join(
+        f"SOLUTION_{s_idx}:\n{solutions[s_idx]}" for s_idx in valid_indices
+    )
+    candidate_answers_block = "\n".join(
+        f"SOLUTION_{s_idx}: {candidate_answers[s_idx]}"
+        for s_idx in valid_indices
+    )
+    prompt = prompt_template.format(
+        question=question,
+        solutions_block=solutions_block,
+        candidate_answers_block=candidate_answers_block,
+    )
+    payload: Dict[str, Any] = {
+        "model": model,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "messages": [
+            {"role": "system", "content": "You are a precise math verifier."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    payload[max_tokens_param] = max_tokens
+    req = urllib.request.Request(
+        url=base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8")
+        body = json.loads(raw)
+        content = _extract_chat_content(body)
+        parsed = _parse_batch_verify_output(content, num_solutions)
+        verdicts: Dict[int, bool] = {}
+        for s_idx in valid_indices:
+            if s_idx not in parsed:
+                continue
+            verdicts[s_idx] = parsed[s_idx][0] == "CORRECT"
+        return verdicts, content, None
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            detail = str(e)
+        return {}, None, f"HTTPError: {e.code} {detail}"
+    except Exception as e:
+        return {}, None, f"{type(e).__name__}: {e}"
+
+
+def _extract_chat_content(body: Dict[str, Any]) -> str:
     try:
         msg = body["choices"][0]["message"]
     except Exception as e:
         raise KeyError(f"Missing choices/message in response: {e}")
-    reasoning = msg.get("reasoning")
-    reasoning_text = reasoning.strip() if isinstance(reasoning, str) and reasoning.strip() else ""
     content = msg.get("content")
-    if isinstance(content, str) and content.strip():
-        content_text = content.strip()
-        if include_reasoning and reasoning_text:
-            return f"[Thinking]\n{reasoning_text}\n\n[Final]\n{content_text}"
-        return content_text
+    if isinstance(content, str):
+        return content.strip()
     if isinstance(content, list):
         parts: List[str] = []
         for item in content:
@@ -408,98 +514,15 @@ def _extract_chat_content(body: Dict[str, Any], *, include_reasoning: bool = Fal
                 if isinstance(txt, str):
                     parts.append(txt)
         if parts:
-            content_text = "\n".join(parts).strip()
-            if include_reasoning and reasoning_text:
-                return f"[Thinking]\n{reasoning_text}\n\n[Final]\n{content_text}"
-            return content_text
-    # Do not fall back to provider-specific hidden reasoning fields. For Qwen
-    # thinking models, configure chat_template_kwargs.enable_thinking=false so
-    # the final answer appears in message.content.
+            return "\n".join(parts).strip()
+    # Fallbacks for alternate OpenAI-compatible payloads.
     alt = msg.get("text")
-    if isinstance(alt, str) and alt.strip():
-        content_text = alt.strip()
-        if include_reasoning and reasoning_text:
-            return f"[Thinking]\n{reasoning_text}\n\n[Final]\n{content_text}"
-        return content_text
+    if isinstance(alt, str):
+        return alt.strip()
     out_txt = body.get("output_text")
-    if isinstance(out_txt, str) and out_txt.strip():
-        content_text = out_txt.strip()
-        if include_reasoning and reasoning_text:
-            return f"[Thinking]\n{reasoning_text}\n\n[Final]\n{content_text}"
-        return content_text
-    if include_reasoning and reasoning_text:
-        return f"[Thinking]\n{reasoning_text}"
+    if isinstance(out_txt, str):
+        return out_txt.strip()
     raise KeyError("Could not parse textual content from chat completion response.")
-
-
-def _extract_completion_text(body: Dict[str, Any]) -> str:
-    try:
-        choice = body["choices"][0]
-    except Exception as e:
-        raise KeyError(f"Missing choices in completion response: {e}")
-    text = choice.get("text")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    raise KeyError("Could not parse text from completion response.")
-
-
-def _extract_chat_reasoning(body: Dict[str, Any]) -> str:
-    try:
-        msg = body["choices"][0]["message"]
-    except Exception as e:
-        raise KeyError(f"Missing choices/message in response: {e}")
-    for key in ("reasoning_content", "reasoning"):
-        value = msg.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def _extract_configured_thinking_budget(extra_body: Mapping[str, Any] | None) -> int:
-    if not extra_body:
-        return 0
-    chat_template_kwargs = extra_body.get("chat_template_kwargs")
-    if not isinstance(chat_template_kwargs, Mapping):
-        return 0
-    raw_budget = chat_template_kwargs.get("thinking_budget")
-    if raw_budget is None:
-        raw_budget = chat_template_kwargs.get("max_thinking_tokens")
-    try:
-        budget = int(raw_budget)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, budget)
-
-
-@lru_cache(maxsize=4)
-def _load_chat_template_tokenizer(tokenizer_name_or_path: str) -> Any:
-    if AutoTokenizer is None:
-        raise RuntimeError("transformers is required for Qwen two-step thinking budget mode.")
-    return AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=True)
-
-
-def _build_qwen_continuation_prompt(
-    *,
-    prompt: str,
-    reasoning: str,
-    tokenizer_name_or_path: str,
-    final_prefill: str = "",
-) -> str:
-    if not tokenizer_name_or_path:
-        raise RuntimeError(
-            "Qwen two-step thinking budget mode requires api_tokenizer_name_or_path "
-            "so the /completions continuation prompt can use the model chat template."
-        )
-    tokenizer = _load_chat_template_tokenizer(tokenizer_name_or_path)
-    messages = [
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "reasoning_content": reasoning, "content": final_prefill},
-    ]
-    return tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        continue_final_message=True,
-    )
 
 
 def _openai_generate_texts(
@@ -514,35 +537,12 @@ def _openai_generate_texts(
     timeout_s: float,
     max_tokens_param: str = "max_completion_tokens",
     reasoning_effort: str = "",
-    extra_body: Mapping[str, Any] | None = None,
-    include_reasoning: bool = False,
-    tokenizer_name_or_path: str = "",
-    final_max_tokens: int = 0,
-    final_prefill: str = "",
     min_interval_s: float = 0.0,
     max_retries: int = 6,
     initial_backoff_s: float = 1.0,
     max_parallel: int = 1,
-    endpoint: str = "chat",
 ) -> List[str]:
-    thinking_budget = _extract_configured_thinking_budget(extra_body)
-    use_two_step_thinking = include_reasoning and thinking_budget > 0
-
-    def _post_json(endpoint: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
-        req = urllib.request.Request(
-            url=base_url.rstrip("/") + endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "self-play-rollout/1.0",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-
-    def _request_once_chat(prompt: str) -> str:
+    def _request_once(prompt: str, backoff_s: float) -> str:
         payload: Dict[str, Any] = {
             "model": model,
             "temperature": temperature,
@@ -552,102 +552,28 @@ def _openai_generate_texts(
         payload[max_tokens_param] = max_completion_tokens
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
-        if extra_body:
-            payload.update(dict(extra_body))
-        body = _post_json("/chat/completions", payload, timeout_s)
-        return _extract_chat_content(body, include_reasoning=include_reasoning)
-
-    def _request_once_completion(prompt: str) -> str:
-        payload: Dict[str, Any] = {
-            "model": model,
-            "temperature": temperature,
-            "top_p": top_p,
-            "prompt": prompt,
-        }
-        payload["max_tokens"] = max_completion_tokens
-        if extra_body:
-            payload.update(dict(extra_body))
-        body = _post_json("/completions", payload, timeout_s)
-        return _extract_completion_text(body)
-
-    def _request_once_qwen_two_step(prompt: str) -> str:
-        if thinking_budget >= max_completion_tokens:
-            raise ValueError(
-                f"thinking_budget ({thinking_budget}) must be smaller than max_completion_tokens "
-                f"({max_completion_tokens})."
-            )
-        first_payload: Dict[str, Any] = {
-            "model": model,
-            "temperature": temperature,
-            "top_p": top_p,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        first_payload[max_tokens_param] = thinking_budget
-        if reasoning_effort:
-            first_payload["reasoning_effort"] = reasoning_effort
-        if extra_body:
-            first_payload.update(dict(extra_body))
-        first_body = _post_json("/chat/completions", first_payload, timeout_s)
-        first_content = ""
-        try:
-            first_content = _extract_chat_content(first_body, include_reasoning=False)
-        except KeyError:
-            first_content = ""
-        reasoning = _extract_chat_reasoning(first_body)
-        if first_content:
-            if reasoning:
-                return f"[Thinking]\n{reasoning}\n\n[Final]\n{first_content}"
-            return first_content
-        if not reasoning:
-            raise KeyError("Qwen thinking-budget first pass returned neither reasoning nor final content.")
-        continuation_prompt = _build_qwen_continuation_prompt(
-            prompt=prompt,
-            reasoning=reasoning,
-            tokenizer_name_or_path=tokenizer_name_or_path or model,
-            final_prefill=final_prefill,
-        )
-        remaining_tokens = max_completion_tokens - thinking_budget
-        if final_max_tokens > 0:
-            remaining_tokens = min(remaining_tokens, final_max_tokens)
-        second_payload: Dict[str, Any] = {
-            "model": model,
-            "temperature": temperature,
-            "top_p": top_p,
-            "prompt": continuation_prompt,
-        }
-        # The OpenAI-compatible /completions endpoint conventionally uses max_tokens.
-        second_payload["max_tokens"] = remaining_tokens
-        second_body = _post_json("/completions", second_payload, timeout_s)
-        final_text = _extract_completion_text(second_body)
-        if final_prefill and not final_text.lstrip().upper().startswith(final_prefill.upper()):
-            final_text = final_prefill.rstrip() + " " + final_text.lstrip()
-        return f"[Thinking]\n{reasoning}\n\n[Final]\n{final_text}"
-
-    def _request_once(prompt: str, backoff_s: float) -> str:
         attempt = 0
         while True:
             attempt += 1
+            req = urllib.request.Request(
+                url=base_url.rstrip("/") + "/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
             try:
-                if use_two_step_thinking:
-                    return _request_once_qwen_two_step(prompt)
-                if endpoint == "completions":
-                    return _request_once_completion(prompt)
-                return _request_once_chat(prompt)
+                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                return _extract_chat_content(body)
             except urllib.error.HTTPError as e:
                 # Retry on server/transient throttling errors.
                 if e.code in (429, 500, 502, 503, 504) and attempt <= max_retries:
                     time.sleep(backoff_s)
                     backoff_s = min(backoff_s * 2.0, 30.0)
                     continue
-                body = e.read().decode("utf-8", errors="replace") if e.fp is not None else ""
-                if body:
-                    raise urllib.error.HTTPError(
-                        e.url,
-                        e.code,
-                        f"{e.reason}: {body}",
-                        e.headers,
-                        None,
-                    ) from e
                 raise
             except Exception:
                 if attempt <= max_retries:
@@ -685,229 +611,6 @@ def _openai_generate_texts(
             last_request_at = time.monotonic()
         outputs.append(_request_once(prompt, max(0.0, initial_backoff_s)))
     return outputs
-
-
-_PYTHON_VERIFY_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "python_exec",
-        "description": (
-            "Execute a short Python 3 program to verify a candidate answer. The program "
-            "should print the computed checks needed for the final VERDICT."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": (
-                        "Python code to execute. Print concise evidence, such as the "
-                        "candidate value, direct substitutions, enumerated cases, or "
-                        "computed expected answer."
-                    ),
-                },
-            },
-            "required": ["code"],
-        },
-    },
-}
-
-
-def _extract_message(body: Mapping[str, Any]) -> Mapping[str, Any]:
-    try:
-        message = body["choices"][0]["message"]  # type: ignore[index]
-    except Exception as e:
-        raise KeyError(f"Missing choices/message in response: {e}")
-    if not isinstance(message, Mapping):
-        raise KeyError("Chat completion message was not an object.")
-    return message
-
-
-def _message_text(message: Mapping[str, Any]) -> str:
-    content = message.get("content")
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: List[str] = []
-        for item in content:
-            if isinstance(item, Mapping) and isinstance(item.get("text"), str):
-                parts.append(str(item["text"]))
-        return "\n".join(parts).strip()
-    return ""
-
-
-def _post_openai_json(
-    *,
-    base_url: str,
-    api_key: str,
-    endpoint: str,
-    payload: Mapping[str, Any],
-    timeout_s: float,
-) -> Mapping[str, Any]:
-    req = urllib.request.Request(
-        url=base_url.rstrip("/") + endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "self-play-rollout/1.0",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def _execute_python_tool_code(code: str, *, timeout_s: float) -> str:
-    if not code.strip():
-        return "Python tool error: no code provided."
-    try:
-        completed = subprocess.run(
-            [sys.executable, "-I", "-c", code],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
-    except subprocess.TimeoutExpired:
-        return "Python tool timed out."
-    out = completed.stdout.strip()
-    err = completed.stderr.strip()
-    parts: List[str] = []
-    parts.append(f"exit_code = {completed.returncode}")
-    if out:
-        parts.append("stdout:\n" + out)
-    if err:
-        parts.append("stderr:\n" + err)
-    return "\n".join(parts)
-
-
-def _openai_verify_with_python_tool(
-    *,
-    prompt: str,
-    question: str,
-    candidate_answer: str,
-    model: str,
-    api_key: str,
-    base_url: str,
-    temperature: float,
-    top_p: float,
-    max_completion_tokens: int,
-    timeout_s: float,
-    max_tokens_param: str,
-    extra_body: Mapping[str, Any] | None,
-    python_timeout_s: float,
-    max_retries: int = 6,
-    initial_backoff_s: float = 1.0,
-) -> Dict[str, Any]:
-    messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
-    first_payload: Dict[str, Any] = {
-        "model": model,
-        "temperature": temperature,
-        "top_p": top_p,
-        "messages": messages,
-        "tools": [_PYTHON_VERIFY_TOOL],
-        "tool_choice": {"type": "function", "function": {"name": "python_exec"}},
-    }
-    first_payload[max_tokens_param] = max_completion_tokens
-    if extra_body:
-        first_payload.update(dict(extra_body))
-    def _post_with_retries(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        backoff_s = max(0.0, initial_backoff_s)
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                return _post_openai_json(
-                    base_url=base_url,
-                    api_key=api_key,
-                    endpoint="/chat/completions",
-                    payload=payload,
-                    timeout_s=timeout_s,
-                )
-            except urllib.error.HTTPError as exc:
-                if exc.code not in {429, 500, 502, 503, 504} or attempt > max_retries:
-                    raise
-                time.sleep(backoff_s)
-                backoff_s = min(max(0.5, backoff_s * 2.0), 30.0)
-
-    first_body = _post_with_retries(first_payload)
-    assistant_message = dict(_extract_message(first_body))
-    tool_calls = assistant_message.get("tool_calls")
-    if not isinstance(tool_calls, list) or not tool_calls:
-        raw_text = _message_text(assistant_message)
-        return {
-            "text": raw_text,
-            "trace": {
-                "tool_call_requested": False,
-                "tool_result": "",
-                "raw_tool_call_message": assistant_message,
-                "raw_final_message": raw_text,
-            },
-        }
-
-    messages.append(assistant_message)
-    tool_results: List[str] = []
-    for tool_call in tool_calls:
-        if not isinstance(tool_call, Mapping):
-            continue
-        fn = tool_call.get("function")
-        if not isinstance(fn, Mapping) or fn.get("name") != "python_exec":
-            continue
-        args_text = fn.get("arguments")
-        args: Dict[str, Any] = {}
-        if isinstance(args_text, str) and args_text.strip():
-            try:
-                loaded_args = json.loads(args_text)
-                if isinstance(loaded_args, dict):
-                    args = loaded_args
-            except json.JSONDecodeError:
-                args = {}
-        code = str(args.get("code", ""))
-        tool_result = _execute_python_tool_code(code, timeout_s=python_timeout_s)
-        tool_results.append(tool_result)
-        tool_call_id = str(tool_call.get("id", "python_exec_call"))
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "name": "python_exec",
-                "content": tool_result,
-            }
-        )
-
-    if not tool_results:
-        raw_text = _message_text(assistant_message)
-        return {
-            "text": raw_text,
-            "trace": {
-                "tool_call_requested": True,
-                "tool_result": "",
-                "raw_tool_call_message": assistant_message,
-                "raw_final_message": raw_text,
-            },
-        }
-
-    final_payload: Dict[str, Any] = {
-        "model": model,
-        "temperature": temperature,
-        "top_p": top_p,
-        "messages": messages,
-    }
-    final_payload[max_tokens_param] = max_completion_tokens
-    if extra_body:
-        final_payload.update(dict(extra_body))
-    final_body = _post_with_retries(final_payload)
-    final_text = _extract_chat_content(dict(final_body), include_reasoning=False)
-    return {
-        "text": final_text,
-        "trace": {
-            "tool_call_requested": True,
-            "tool_result": "\n\n".join(tool_results),
-            "raw_tool_call_message": assistant_message,
-            "raw_final_message": final_text,
-        },
-    }
 
 
 def _read_env_var_from_dotenv(var_name: str, dotenv_path: Path = Path(".env")) -> str | None:
@@ -1016,16 +719,7 @@ def main() -> None:
         )
     )
 
-    question_template_raw = _load_text(gen_cfg["prompt_template_path"])
-    prompt_suffix = str(gen_cfg.get("prompt_suffix", "")).strip()
-
-    def _render_generator_prompt(prompt_seed: int) -> str:
-        question_bank_examples = render_question_bank_block_from_config(gen_cfg, seed=prompt_seed)
-        rendered = question_template_raw.format(question_bank_examples=question_bank_examples)
-        if prompt_suffix:
-            rendered = rendered.rstrip() + "\n\n" + prompt_suffix + "\n"
-        return rendered
-
+    question_template = _load_text(gen_cfg["prompt_template_path"])
     judge_template = _load_text(judge_cfg["prompt_template_path"])
     verify_template_default = (
         "You are a strict math verifier.\n"
@@ -1076,13 +770,31 @@ def main() -> None:
     strong_provider = str(strong_cfg.get("provider", "openai")).lower()
     strong_model = str(strong_cfg.get("model", "gpt-4.1"))
     strong_base_url = str(strong_cfg.get("base_url", "https://api.openai.com/v1"))
+    strong_mode = str(strong_cfg.get("mode", "solve")).strip().lower()
+    if strong_mode not in {"solve", "verify_batch"}:
+        raise ValueError(
+            f"Unsupported strong_verifier.mode: {strong_mode!r} (use 'solve' or 'verify_batch')."
+        )
+    strong_verify_batch_template = str(
+        strong_cfg.get(
+            "verify_batch_prompt_template",
+            (
+                "You are a strict math verifier.\n"
+                "For each candidate solution, determine whether the FINAL_ANSWER is correct.\n"
+                "Output exactly one line per solution in this format:\n"
+                "SOLUTION_<index>: CORRECT|INCORRECT\n\n"
+                "Question:\n{question}\n\n"
+                "Candidate answers:\n{candidate_answers_block}\n\n"
+                "Candidate solutions:\n{solutions_block}\n"
+            ),
+        )
+    )
+    strong_check_question_validity = bool(strong_cfg.get("check_question_validity", False))
 
     num_questions = int(pair_cfg.get("num_questions", 1))
     num_solutions = int(sol_cfg.get("num_solutions_per_question", 4))
     repeats = int(judge_cfg.get("repeats_per_pair", 3))
     verify_repeats = int(judge_cfg.get("repeats_per_solution", repeats))
-    python_assisted_verify = bool(judge_cfg.get("python_assisted", False))
-    python_verify_timeout_s = float(judge_cfg.get("python_timeout_s", 5.0))
     randomize_judge_order = bool(judge_cfg.get("randomize_a_b_order", True))
     balanced_judge_order = bool(judge_cfg.get("balanced_a_b_order", True))
     judge_mode = str(judge_cfg.get("mode", "pairwise")).strip().lower()
@@ -1148,9 +860,15 @@ def main() -> None:
         role_name = str(role_cfg.get("_role_name", "role"))
         t0 = time.perf_counter()
         if debug_timing:
+            uses_api = _cfg_uses_openai(role_cfg)
+            parallel_info = (
+                f" api_max_parallel={int(role_cfg.get('api_max_parallel', 1))}"
+                if uses_api
+                else ""
+            )
             print(
                 f"[timing] start {role_name}: prompts={len(prompts)} max_new_tokens={max_new_tokens} "
-                f"batch_size={batch_size}",
+                f"batch_size={batch_size}{parallel_info}",
                 flush=True,
             )
         if _cfg_uses_openai(role_cfg):
@@ -1171,18 +889,10 @@ def main() -> None:
                 timeout_s=float(role_cfg.get("api_timeout_s", 120.0)),
                 max_tokens_param=str(role_cfg.get("api_max_tokens_param", "max_completion_tokens")),
                 reasoning_effort=str(role_cfg.get("api_reasoning_effort", "")).strip(),
-                extra_body=role_cfg.get("api_extra_body") if isinstance(role_cfg.get("api_extra_body"), dict) else None,
-                include_reasoning=bool(role_cfg.get("include_reasoning_in_output", False)),
-                tokenizer_name_or_path=str(
-                    role_cfg.get("api_tokenizer_name_or_path", role_cfg.get("api_model", ""))
-                ).strip(),
-                final_max_tokens=int(role_cfg.get("api_final_max_tokens", 0)),
-                final_prefill=str(role_cfg.get("api_final_prefill", "")).strip(),
                 min_interval_s=float(role_cfg.get("api_min_interval_s", 0.0)),
                 max_retries=int(role_cfg.get("api_max_retries", 6)),
                 initial_backoff_s=float(role_cfg.get("api_backoff_initial_s", 1.0)),
                 max_parallel=int(role_cfg.get("api_max_parallel", 1)),
-                endpoint=str(role_cfg.get("api_endpoint", "chat")).strip(),
             )
         else:
             outputs = _generate_texts(
@@ -1198,17 +908,14 @@ def main() -> None:
             print(f"[timing] done  {role_name}: {dt:.2f}s", flush=True)
         return outputs
 
-    raw_generator_prompts = [_render_generator_prompt(seed + idx) for idx in range(num_questions)]
-    raw_generator_prompts_used = list(raw_generator_prompts)
-    generator_prompts = [
-        _apply_chat_template(
-            gen_bundle.tokenizer,
-            raw_prompt,
-            bool(gen_cfg.get("use_chat_template", False)),
-            gen_cfg.get("enable_thinking", None),
-        )
-        for raw_prompt in raw_generator_prompts
-    ]
+    raw_gen_prompt = question_template
+    generator_prompt = _apply_chat_template(
+        gen_bundle.tokenizer,
+        raw_gen_prompt,
+        bool(gen_cfg.get("use_chat_template", False)),
+        gen_cfg.get("enable_thinking", None),
+    )
+    generator_prompts = [generator_prompt] * num_questions
     question_generations = _role_generate_texts(
         gen_cfg,
         gen_bundle,
@@ -1228,30 +935,16 @@ def main() -> None:
     ]
     retry_round = 0
     while invalid_indices and retry_round < max_retries:
-        raw_retry_prompts = [
-            _render_generator_prompt(seed + 10_000 * (retry_round + 1) + idx)
-            for idx in invalid_indices
-        ]
-        retry_prompts = [
-            _apply_chat_template(
-                gen_bundle.tokenizer,
-                raw_prompt,
-                bool(gen_cfg.get("use_chat_template", False)),
-                gen_cfg.get("enable_thinking", None),
-            )
-            for raw_prompt in raw_retry_prompts
-        ]
         retry_outputs = _role_generate_texts(
             gen_cfg,
             gen_bundle,
-            retry_prompts,
+            [generator_prompt] * len(invalid_indices),
             temperature=float(gen_cfg.get("temperature", 1.0)),
             top_p=float(gen_cfg.get("top_p", 0.95)),
             max_new_tokens=int(gen_cfg.get("max_new_tokens", 128)),
             batch_size=max(1, int(gen_cfg.get("batch_size", 8))),
         )
-        for idx, raw_prompt, new_raw in zip(invalid_indices, raw_retry_prompts, retry_outputs):
-            raw_generator_prompts_used[idx] = raw_prompt
+        for idx, new_raw in zip(invalid_indices, retry_outputs):
             cleaned_question_generations[idx] = new_raw
             questions[idx] = _parse_question(new_raw)
         invalid_indices = [
@@ -1318,34 +1011,20 @@ def main() -> None:
             seen_questions.add(norm)
     dedup_round = 0
     while dup_indices and dedup_round < max_retries:
-        raw_dedup_prompts = [
-            _render_generator_prompt(seed + 20_000 * (dedup_round + 1) + idx)
-            for idx in dup_indices
-        ]
-        dedup_prompts = [
-            _apply_chat_template(
-                gen_bundle.tokenizer,
-                raw_prompt,
-                bool(gen_cfg.get("use_chat_template", False)),
-                gen_cfg.get("enable_thinking", None),
-            )
-            for raw_prompt in raw_dedup_prompts
-        ]
         retry_qs = _role_generate_texts(
             gen_cfg,
             gen_bundle,
-            dedup_prompts,
+            [generator_prompt] * len(dup_indices),
             temperature=float(gen_cfg.get("temperature", 1.0)),
             top_p=float(gen_cfg.get("top_p", 0.95)),
             max_new_tokens=int(gen_cfg.get("max_new_tokens", 128)),
             batch_size=max(1, int(gen_cfg.get("batch_size", 8))),
         )
         still_dup: list[int] = []
-        for idx, raw_prompt, new_raw in zip(dup_indices, raw_dedup_prompts, retry_qs):
+        for idx, new_raw in zip(dup_indices, retry_qs):
             new_q = _parse_question(new_raw)
             norm = new_q.strip().lower()
             if norm and norm not in seen_questions:
-                raw_generator_prompts_used[idx] = raw_prompt
                 questions[idx] = new_q
                 cleaned_question_generations[idx] = new_raw
                 seen_questions.add(norm)
@@ -1418,7 +1097,7 @@ def main() -> None:
     # In single-verify mode, precompute verifier outputs for all questions in one call.
     precomputed_verify_raw_prompts_by_question: List[str] = []
     precomputed_verify_outputs_by_question: List[List[str]] = []
-    precomputed_single_verify_by_question: List[Dict[int, Dict[str, Any]]] = []
+    precomputed_verify_valid_solution_indices_by_question: List[List[int]] = []
     if (
         judge_mode == "single_verify"
         and bool(judge_cfg.get("batch_verify_all_solutions", False))
@@ -1426,16 +1105,20 @@ def main() -> None:
     ):
         verify_jobs: List[Dict[str, Any]] = []
         precomputed_verify_raw_prompts_by_question = ["" for _ in range(len(questions))]
+        precomputed_verify_valid_solution_indices_by_question = [[] for _ in range(len(questions))]
         for q_idx, question in enumerate(questions):
             solver_outputs = solver_outputs_by_question[q_idx]
             solver_parsed_answers = [_parse_solver_final_answer(s_text) for s_text in solver_outputs]
+            valid_indices = [s_idx for s_idx, ans in enumerate(solver_parsed_answers) if ans is not None]
+            precomputed_verify_valid_solution_indices_by_question[q_idx] = valid_indices
+            if not valid_indices:
+                continue
             candidate_answers_block = "\n".join(
-                f"SOLUTION_{s_idx}: "
-                f"{solver_parsed_answers[s_idx] if solver_parsed_answers[s_idx] is not None else 'NONE'}"
-                for s_idx in range(num_solutions)
+                f"SOLUTION_{s_idx}: {solver_parsed_answers[s_idx]}"
+                for s_idx in valid_indices
             )
             solutions_block = "\n\n".join(
-                f"SOLUTION_{s_idx}:\n{s_text}" for s_idx, s_text in enumerate(solver_outputs)
+                f"SOLUTION_{s_idx}:\n{solver_outputs[s_idx]}" for s_idx in valid_indices
             )
             raw_prompt = verify_batch_template.format(
                 question=question,
@@ -1470,141 +1153,6 @@ def main() -> None:
         for job, output in zip(verify_jobs, verify_outputs_all):
             q_idx = int(job["question_index"])
             precomputed_verify_outputs_by_question[q_idx].append(output)
-
-    if (
-        judge_mode == "single_verify"
-        and not bool(judge_cfg.get("batch_verify_all_solutions", False))
-        and batch_solver_across_questions
-    ):
-        precomputed_single_verify_by_question = [
-            {
-                s_idx: {
-                    "raw_prompt": None,
-                    "raw_outputs": [],
-                    "verdicts": [],
-                    "model_confidences": [],
-                }
-                for s_idx in range(num_solutions)
-            }
-            for _ in range(len(questions))
-        ]
-        verify_jobs: List[Dict[str, Any]] = []
-        for q0_idx, question in enumerate(questions):
-            solver_outputs = solver_outputs_by_question[q0_idx]
-            solver_parsed_answers = [_parse_solver_final_answer(s_text) for s_text in solver_outputs]
-            for s_idx, s_text in enumerate(solver_outputs):
-                if solver_parsed_answers[s_idx] is None:
-                    for _ in range(verify_repeats):
-                        precomputed_single_verify_by_question[q0_idx][s_idx]["verdicts"].append("INCORRECT")
-                        precomputed_single_verify_by_question[q0_idx][s_idx]["model_confidences"].append(0.0)
-                    continue
-                for _ in range(verify_repeats):
-                    candidate_answer = str(solver_parsed_answers[s_idx])
-                    raw_prompt = verify_template.format(
-                        question=question,
-                        solution=s_text,
-                        candidate_answer=candidate_answer,
-                    )
-                    formatted_prompt = _apply_chat_template(
-                        judge_bundle.tokenizer,
-                        raw_prompt,
-                        bool(judge_cfg.get("use_chat_template", False)),
-                        judge_cfg.get("enable_thinking", None),
-                    )
-                    verify_jobs.append(
-                        {
-                            "question_index": q0_idx,
-                            "solution_index": s_idx,
-                            "raw_prompt": raw_prompt,
-                            "formatted_prompt": formatted_prompt,
-                            "question": question,
-                            "candidate_answer": candidate_answer,
-                        }
-                    )
-
-        if debug_timing:
-            print(
-                f"[timing] start judge_global: prompts={len(verify_jobs)} "
-                f"max_new_tokens={int(judge_cfg.get('max_new_tokens', 64))}",
-                flush=True,
-            )
-        t_verify0 = time.perf_counter()
-        tool_traces: List[Dict[str, Any] | None] = [None] * len(verify_jobs)
-        if verify_jobs and python_assisted_verify and _cfg_uses_openai(judge_cfg):
-            judge_api_key = _resolve_api_key(judge_cfg) or openai_api_key
-            if not judge_api_key:
-                raise RuntimeError("No API key found for tool-calling verifier.")
-
-            def _global_tool_worker(idx_job: tuple[int, Dict[str, Any]]) -> tuple[int, Dict[str, Any]]:
-                idx, job = idx_job
-                result = _openai_verify_with_python_tool(
-                    prompt=str(job["raw_prompt"]),
-                    question=str(job["question"]),
-                    candidate_answer=str(job["candidate_answer"]),
-                    model=_cfg_openai_model(judge_cfg),
-                    api_key=judge_api_key,
-                    base_url=str(judge_cfg.get("api_base_url", openai_base_url)),
-                    temperature=float(judge_cfg.get("temperature", 0.0)),
-                    top_p=float(judge_cfg.get("top_p", 0.9)),
-                    max_completion_tokens=int(judge_cfg.get("max_new_tokens", 64)),
-                    timeout_s=float(judge_cfg.get("api_timeout_s", 120.0)),
-                    max_tokens_param=str(judge_cfg.get("api_max_tokens_param", "max_completion_tokens")),
-                    extra_body=(
-                        judge_cfg.get("api_extra_body")
-                        if isinstance(judge_cfg.get("api_extra_body"), dict)
-                        else None
-                    ),
-                    python_timeout_s=python_verify_timeout_s,
-                    max_retries=int(judge_cfg.get("api_max_retries", 6)),
-                    initial_backoff_s=float(judge_cfg.get("api_backoff_initial_s", 1.0)),
-                )
-                return idx, result
-
-            max_workers = max(1, int(judge_cfg.get("api_max_parallel", 1)))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-                futures = [
-                    ex.submit(_global_tool_worker, (idx, job))
-                    for idx, job in enumerate(verify_jobs)
-                ]
-                for fut in concurrent.futures.as_completed(futures):
-                    idx, result = fut.result()
-                    tool_traces[idx] = result
-            verify_outputs = [str(t["text"]) for t in tool_traces if t is not None]
-        elif verify_jobs:
-            verify_outputs = _role_generate_texts(
-                judge_cfg,
-                judge_bundle,
-                [j["formatted_prompt"] for j in verify_jobs],
-                temperature=float(judge_cfg.get("temperature", 0.0)),
-                top_p=float(judge_cfg.get("top_p", 0.9)),
-                max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
-                batch_size=int(judge_cfg.get("batch_size", 32)),
-            )
-        else:
-            verify_outputs = []
-        if debug_timing:
-            print(f"[timing] done  judge_global: {time.perf_counter() - t_verify0:.2f}s", flush=True)
-
-        for idx_output, (job, output) in enumerate(zip(verify_jobs, verify_outputs)):
-            q0_idx = int(job["question_index"])
-            s_idx = int(job["solution_index"])
-            row = precomputed_single_verify_by_question[q0_idx][s_idx]
-            if row["raw_prompt"] is None:
-                row["raw_prompt"] = job["raw_prompt"]
-            trace = tool_traces[idx_output]
-            if trace is not None:
-                row["raw_outputs"].append(
-                    "[Tool call requested]\n"
-                    + json.dumps(trace.get("trace", {}).get("raw_tool_call_message", {}), ensure_ascii=True)
-                    + "\n\n[Python tool result]\n"
-                    + str(trace.get("trace", {}).get("tool_result", ""))
-                    + "\n\n[Final verifier output]\n"
-                    + output
-                )
-            else:
-                row["raw_outputs"].append(output)
-            row["verdicts"].append(_parse_verdict(output))
-            row["model_confidences"].append(_parse_confidence(output))
 
     with out_path.open(file_open_mode, encoding="utf-8") as f:
         for q_idx, question in enumerate(tqdm(questions, desc="pairwise_rollouts", unit="q"), start=1):
@@ -1726,45 +1274,58 @@ def main() -> None:
                     s_idx: {"raw_prompt": None, "raw_outputs": [], "verdicts": [], "model_confidences": []}
                     for s_idx in range(num_solutions)
                 }
-                if precomputed_single_verify_by_question:
-                    per_solution = precomputed_single_verify_by_question[q_idx - 1]
-                elif verify_batch_all:
+                if verify_batch_all:
                     if precomputed_verify_outputs_by_question:
                         raw_prompt = precomputed_verify_raw_prompts_by_question[q_idx - 1]
                         verify_outputs = precomputed_verify_outputs_by_question[q_idx - 1]
+                        valid_indices = precomputed_verify_valid_solution_indices_by_question[q_idx - 1]
                     else:
-                        candidate_answers_block = "\n".join(
-                            f"SOLUTION_{s_idx}: "
-                            f"{solver_parsed_answers[s_idx] if solver_parsed_answers[s_idx] is not None else 'NONE'}"
-                            for s_idx in range(num_solutions)
-                        )
-                        solutions_block = "\n\n".join(
-                            f"SOLUTION_{s_idx}:\n{s_text}" for s_idx, s_text in enumerate(solver_outputs)
-                        )
-                        raw_prompt = verify_batch_template.format(
-                            question=question,
-                            solutions_block=solutions_block,
-                            candidate_answers_block=candidate_answers_block,
-                        )
-                        formatted_prompt = _apply_chat_template(
-                            judge_bundle.tokenizer,
-                            raw_prompt,
-                            bool(judge_cfg.get("use_chat_template", False)),
-                            judge_cfg.get("enable_thinking", None),
-                        )
-                        verify_outputs = _role_generate_texts(
-                            judge_cfg,
-                            judge_bundle,
-                            [formatted_prompt] * verify_repeats,
-                            temperature=float(judge_cfg.get("temperature", 0.0)),
-                            top_p=float(judge_cfg.get("top_p", 0.9)),
-                            max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
-                            batch_size=int(judge_cfg.get("batch_size", 32)),
-                        )
+                        valid_indices = [
+                            s_idx for s_idx, ans in enumerate(solver_parsed_answers) if ans is not None
+                        ]
+                        if not valid_indices:
+                            verify_outputs = []
+                            raw_prompt = ""
+                        else:
+                            candidate_answers_block = "\n".join(
+                                f"SOLUTION_{s_idx}: {solver_parsed_answers[s_idx]}"
+                                for s_idx in valid_indices
+                            )
+                            solutions_block = "\n\n".join(
+                                f"SOLUTION_{s_idx}:\n{solver_outputs[s_idx]}" for s_idx in valid_indices
+                            )
+                            raw_prompt = verify_batch_template.format(
+                                question=question,
+                                solutions_block=solutions_block,
+                                candidate_answers_block=candidate_answers_block,
+                            )
+                            formatted_prompt = _apply_chat_template(
+                                judge_bundle.tokenizer,
+                                raw_prompt,
+                                bool(judge_cfg.get("use_chat_template", False)),
+                                judge_cfg.get("enable_thinking", None),
+                            )
+                            verify_outputs = _role_generate_texts(
+                                judge_cfg,
+                                judge_bundle,
+                                [formatted_prompt] * verify_repeats,
+                                temperature=float(judge_cfg.get("temperature", 0.0)),
+                                top_p=float(judge_cfg.get("top_p", 0.9)),
+                                max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
+                                batch_size=int(judge_cfg.get("batch_size", 32)),
+                            )
+                    for s_idx in range(num_solutions):
+                        if solver_parsed_answers[s_idx] is None:
+                            for _ in range(verify_repeats):
+                                per_solution[s_idx]["verdicts"].append("INCORRECT")
+                                per_solution[s_idx]["model_confidences"].append(0.0)
                     for output in verify_outputs:
                         parsed_rows = _parse_batch_verify_output(output, num_solutions)
-                        for s_idx in range(num_solutions):
-                            verdict, conf = parsed_rows.get(s_idx, ("INCORRECT", 0.5))
+                        for s_idx in valid_indices:
+                            # Exclude malformed verifier rows rather than counting them as INCORRECT.
+                            if s_idx not in parsed_rows:
+                                continue
+                            verdict, conf = parsed_rows[s_idx]
                             per_solution[s_idx]["raw_prompt"] = raw_prompt
                             per_solution[s_idx]["raw_outputs"].append(output)
                             per_solution[s_idx]["verdicts"].append(verdict)
@@ -1796,80 +1357,29 @@ def main() -> None:
                                     "solution_index": s_idx,
                                     "raw_prompt": raw_prompt,
                                     "formatted_prompt": formatted_prompt,
-                                    "question": question,
-                                    "candidate_answer": candidate_answer,
                                 }
                             )
 
-                    tool_traces: List[Dict[str, Any] | None] = [None] * len(verify_jobs)
-                    if python_assisted_verify and _cfg_uses_openai(judge_cfg):
-                        judge_api_key = _resolve_api_key(judge_cfg) or openai_api_key
-                        if not judge_api_key:
-                            raise RuntimeError("No API key found for tool-calling verifier.")
-
-                        def _tool_worker(idx_job: tuple[int, Dict[str, Any]]) -> tuple[int, Dict[str, Any]]:
-                            idx, job = idx_job
-                            result = _openai_verify_with_python_tool(
-                                prompt=str(job["raw_prompt"]),
-                                question=str(job["question"]),
-                                candidate_answer=str(job["candidate_answer"]),
-                                model=_cfg_openai_model(judge_cfg),
-                                api_key=judge_api_key,
-                                base_url=str(judge_cfg.get("api_base_url", openai_base_url)),
-                                temperature=float(judge_cfg.get("temperature", 0.0)),
-                                top_p=float(judge_cfg.get("top_p", 0.9)),
-                                max_completion_tokens=int(judge_cfg.get("max_new_tokens", 64)),
-                                timeout_s=float(judge_cfg.get("api_timeout_s", 120.0)),
-                                max_tokens_param=str(judge_cfg.get("api_max_tokens_param", "max_completion_tokens")),
-                                extra_body=(
-                                    judge_cfg.get("api_extra_body")
-                                    if isinstance(judge_cfg.get("api_extra_body"), dict)
-                                    else None
-                                ),
-                                python_timeout_s=python_verify_timeout_s,
-                                max_retries=int(judge_cfg.get("api_max_retries", 6)),
-                                initial_backoff_s=float(judge_cfg.get("api_backoff_initial_s", 1.0)),
-                            )
-                            return idx, result
-
-                        max_workers = max(1, int(judge_cfg.get("api_max_parallel", 1)))
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-                            futures = [
-                                ex.submit(_tool_worker, (idx, job))
-                                for idx, job in enumerate(verify_jobs)
-                            ]
-                            for fut in concurrent.futures.as_completed(futures):
-                                idx, result = fut.result()
-                                tool_traces[idx] = result
-                        verify_outputs = [str(t["text"]) for t in tool_traces if t is not None]
-                    else:
-                        verify_outputs = _role_generate_texts(
-                            judge_cfg,
-                            judge_bundle,
-                            [j["formatted_prompt"] for j in verify_jobs],
-                            temperature=float(judge_cfg.get("temperature", 0.0)),
-                            top_p=float(judge_cfg.get("top_p", 0.9)),
-                            max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
-                            batch_size=int(judge_cfg.get("batch_size", 32)),
-                        )
-                    for idx_output, (job, output) in enumerate(zip(verify_jobs, verify_outputs)):
+                    verify_outputs = _role_generate_texts(
+                        judge_cfg,
+                        judge_bundle,
+                        [j["formatted_prompt"] for j in verify_jobs],
+                        temperature=float(judge_cfg.get("temperature", 0.0)),
+                        top_p=float(judge_cfg.get("top_p", 0.9)),
+                        max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
+                        batch_size=int(judge_cfg.get("batch_size", 32)),
+                    )
+                    for job, output in zip(verify_jobs, verify_outputs):
                         s_idx = int(job["solution_index"])
                         row = per_solution[s_idx]
                         if row["raw_prompt"] is None:
                             row["raw_prompt"] = job["raw_prompt"]
-                        trace = tool_traces[idx_output]
-                        if trace is not None:
-                            row["raw_outputs"].append(
-                                "[Tool call requested]\n"
-                                + json.dumps(trace.get("trace", {}).get("raw_tool_call_message", {}), ensure_ascii=True)
-                                + "\n\n[Python tool result]\n"
-                                + str(trace.get("trace", {}).get("tool_result", ""))
-                                + "\n\n[Final verifier output]\n"
-                                + output
-                            )
-                        else:
-                            row["raw_outputs"].append(output)
-                        row["verdicts"].append(_parse_verdict(output))
+                        row["raw_outputs"].append(output)
+                        verdict = _parse_verdict_optional(output)
+                        if verdict is None:
+                            # Exclude malformed verifier outputs from scoring.
+                            continue
+                        row["verdicts"].append(verdict)
                         row["model_confidences"].append(_parse_confidence(output))
 
                 for s_idx in range(num_solutions):
@@ -1877,16 +1387,19 @@ def main() -> None:
                     model_confidences = list(per_solution[s_idx]["model_confidences"])
                     n_correct = verdicts.count("CORRECT")
                     n_incorrect = verdicts.count("INCORRECT")
-                    confidence = max(n_correct, n_incorrect) / max(1, verify_repeats)
-                    consistency_values.append(confidence)
-                    score_points[s_idx] += n_correct / max(1, verify_repeats)
-                    score_counts[s_idx] += 1
+                    parsed_repeats = len(verdicts)
+                    confidence = max(n_correct, n_incorrect) / max(1, parsed_repeats)
+                    if parsed_repeats > 0:
+                        consistency_values.append(confidence)
+                        score_points[s_idx] += n_correct / parsed_repeats
+                        score_counts[s_idx] += 1
                     verification_rows.append(
                         {
                             "solution_index": s_idx,
                             "verdicts": verdicts,
                             "model_confidences": model_confidences,
                             "counts": {"CORRECT": n_correct, "INCORRECT": n_incorrect},
+                            "parsed_repeats": parsed_repeats,
                             "confidence": confidence,
                             "model_confidence_mean": (
                                 sum(model_confidences) / len(model_confidences) if model_confidences else 0.5
@@ -1912,8 +1425,11 @@ def main() -> None:
                 group_scores_lists: List[List[float]] = [[] for _ in sampling_groups]
                 for s_idx in range(num_solutions):
                     grp_idx = solution_group_map[s_idx]
-                    n_c = per_solution[s_idx]["verdicts"].count("CORRECT")
-                    verify_score = n_c / max(1, verify_repeats)
+                    verdicts = per_solution[s_idx]["verdicts"]
+                    if not verdicts:
+                        continue
+                    n_c = verdicts.count("CORRECT")
+                    verify_score = n_c / len(verdicts)
                     group_scores_lists[grp_idx].append(verify_score)
                 group_verify_means = [
                     sum(gs) / len(gs) if gs else 0.0 for gs in group_scores_lists
@@ -1937,46 +1453,13 @@ def main() -> None:
                             s_i = 0.5
                         elo_ratings[i], elo_ratings[j] = _elo_update(elo_ratings[i], elo_ratings[j], s_i, elo_k)
 
-            # Pairwise-mode separation diagnostics.
-            # r_sep_elo: mean Elo(group 0) - mean Elo(group 1).
-            # r_sep_pairwise_winrate: fraction of cross-group votes favoring group 0 over group 1.
-            r_sep_elo: float | None = None
-            group_elo_means: List[float] = []
-            r_sep_pairwise_winrate: float | None = None
-            if len(sampling_groups) >= 2 and judge_mode == "pairwise":
-                group_elos: List[List[float]] = [[] for _ in sampling_groups]
-                for s_idx in range(num_solutions):
-                    grp_idx = int(solution_group_map[s_idx])
-                    if 0 <= grp_idx < len(group_elos):
-                        group_elos[grp_idx].append(float(elo_ratings[s_idx]))
-                group_elo_means = [sum(xs) / len(xs) if xs else float(elo_initial) for xs in group_elos]
-                r_sep_elo = group_elo_means[0] - group_elo_means[1]
-
-                cross_votes = 0
-                g0_wins = 0
-                for pair in pairwise_rows:
-                    i = int(pair["i"])
-                    j = int(pair["j"])
-                    gi = int(solution_group_map[i])
-                    gj = int(solution_group_map[j])
-                    if gi == gj:
-                        continue
-                    # Only define winrate between groups 0 and 1 for now.
-                    if {gi, gj} != {0, 1}:
-                        continue
-                    for pref in pair.get("prefs", []):
-                        if pref not in {"A", "B"}:
-                            continue
-                        winner = i if pref == "A" else j
-                        if int(solution_group_map[winner]) == 0:
-                            g0_wins += 1
-                        cross_votes += 1
-                if cross_votes > 0:
-                    r_sep_pairwise_winrate = g0_wins / cross_votes
-
             oracle_answer: int | None = None
+            oracle_solution_verdicts: Dict[int, bool] | None = None
             oracle_raw_response: str | None = None
             oracle_error: str | None = None
+            oracle_question_valid: bool | None = None
+            oracle_question_check_raw: str | None = None
+            oracle_question_check_error: str | None = None
             if strong_enabled and strong_provider == "openai":
                 api_key = (
                     _read_env_var_from_dotenv("OPENAI_API_KEY")
@@ -1987,61 +1470,57 @@ def main() -> None:
                 if not api_key:
                     oracle_error = "OPENAI_API_KEY (or OPENAI_KEY) is not set."
                 else:
-                    oracle_answer, oracle_raw_response, oracle_error = _openai_oracle_answer(
-                        question=question,
-                        model=strong_model,
-                        api_key=api_key,
-                        base_url=strong_base_url,
-                        timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
-                        max_tokens_param=str(
-                            strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
-                        ),
-                        max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
-                    )
-
-            # Verdict-only self-play schema (single_verify mode only).
-            #
-            # Until the dedicated question filter (Agent 2) exists, every
-            # question coming out of this rollout is treated as `accepted=True`.
-            # Once the filter is in place, the collector will set this from the
-            # filter result and filtered-out questions will get
-            # `question_reward = 0.0` automatically via compute_question_reward.
-            verdict_only_solver_rewards: List[Any] = []
-            verdict_only_per_solution_canonical: List[str] = []
-            question_reward_breakdown = None
-            if judge_mode == "single_verify":
-                # Collapse per-solution verify_repeats verdicts to a single
-                # canonical verdict using a simple majority vote.
-                for s_idx in range(num_solutions):
-                    raw = list(per_solution[s_idx]["verdicts"])
-                    n_c = sum(1 for v in raw if v == "CORRECT")
-                    n_i = sum(1 for v in raw if v == "INCORRECT")
-                    if n_c > n_i:
-                        verdict_only_per_solution_canonical.append(VERDICT_CORRECT)
-                    elif n_i > n_c:
-                        verdict_only_per_solution_canonical.append(VERDICT_INCORRECT)
+                    if strong_check_question_validity:
+                        (
+                            oracle_question_valid,
+                            oracle_question_check_raw,
+                            oracle_question_check_error,
+                        ) = _openai_oracle_question_check(
+                            question=question,
+                            model=strong_model,
+                            api_key=api_key,
+                            base_url=strong_base_url,
+                            timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
+                            max_tokens_param=str(
+                                strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
+                            ),
+                            max_tokens=int(strong_cfg.get("question_check_max_tokens", 256)),
+                        )
+                    if strong_mode == "verify_batch":
+                        oracle_solution_verdicts, oracle_raw_response, oracle_error = (
+                            _openai_oracle_verify_batch(
+                                question=question,
+                                solutions=solver_outputs,
+                                candidate_answers=solver_parsed_answers,
+                                model=strong_model,
+                                api_key=api_key,
+                                base_url=strong_base_url,
+                                timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
+                                max_tokens_param=str(
+                                    strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
+                                ),
+                                max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
+                                prompt_template=strong_verify_batch_template,
+                            )
+                        )
                     else:
-                        verdict_only_per_solution_canonical.append(VERDICT_UNCLEAR)
-                verdict_only_solver_rewards = score_solver_completions(
-                    verdict_only_per_solution_canonical,
-                    question_accepted=True,
-                )
-                question_reward_breakdown = compute_question_reward(
-                    accepted=True,
-                    verdicts=verdict_only_per_solution_canonical,
-                )
+                        oracle_answer, oracle_raw_response, oracle_error = _openai_oracle_answer(
+                            question=question,
+                            model=strong_model,
+                            api_key=api_key,
+                            base_url=strong_base_url,
+                            timeout_s=float(strong_cfg.get("timeout_s", 60.0)),
+                            max_tokens_param=str(
+                                strong_cfg.get("api_max_tokens_param", "max_completion_tokens")
+                            ),
+                            max_tokens=int(strong_cfg.get("oracle_max_tokens", 1024)),
+                        )
 
             row = {
-                **(
-                    {"schema_version": SCHEMA_VERSION}
-                    if judge_mode == "single_verify"
-                    else {}
-                ),
                 "run_id": run_id,
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                 "question_index": question_index_base + (q_idx - 1),
                 "question": question,
-                "generator_prompt": raw_generator_prompts_used[q_idx - 1],
                 "generator_raw_output": cleaned_question_generations[q_idx - 1],
                 "solutions": [
                     {
@@ -2053,20 +1532,14 @@ def main() -> None:
                         "elo_rating": elo_ratings[s_idx],
                         **(
                             {
-                                "verdict": verdict_only_solver_rewards[s_idx].verdict,
-                                "verdict_score": verdict_only_solver_rewards[s_idx].score,
-                                "solver_advantage": verdict_only_solver_rewards[s_idx].advantage,
-                                "trainable_for_solver": verdict_only_solver_rewards[
-                                    s_idx
-                                ].trainable_for_solver,
-                            }
-                            if judge_mode == "single_verify"
-                            else {}
-                        ),
-                        **(
-                            {
                                 "oracle_correct": (
-                                    (parsed is not None and oracle_answer is not None and parsed == oracle_answer)
+                                    (
+                                        False
+                                        if parsed is None
+                                        else oracle_solution_verdicts.get(s_idx, False)
+                                    )
+                                    if oracle_solution_verdicts is not None
+                                    else (parsed is not None and oracle_answer is not None and parsed == oracle_answer)
                                 )
                             }
                             if strong_enabled
@@ -2075,22 +1548,6 @@ def main() -> None:
                     }
                     for s_idx, s_text in enumerate(solver_outputs)
                 ],
-                **(
-                    {
-                        "accepted": question_reward_breakdown.accepted,
-                        "question_reward": question_reward_breakdown.reward,
-                        "trainable_for_proposer": question_reward_breakdown.trainable_for_proposer,
-                        "verdict_summary": {
-                            "counts": question_reward_breakdown.verdict_counts,
-                            "verdict_variance": question_reward_breakdown.verdict_variance,
-                            "judgeability": question_reward_breakdown.judgeability,
-                            "filter_score": question_reward_breakdown.filter_score,
-                            "note": question_reward_breakdown.note,
-                        },
-                    }
-                    if judge_mode == "single_verify" and question_reward_breakdown is not None
-                    else {}
-                ),
                 "pairwise_comparisons": pairwise_rows,
                 **({"solution_verifications": verification_rows} if judge_mode == "single_verify" else {}),
                 "reliability": {
@@ -2099,15 +1556,6 @@ def main() -> None:
                     ),
                     "num_pairs": len(pairwise_rows),
                     "repeats_per_pair": repeats,
-                    **(
-                        {
-                            "r_sep_elo": r_sep_elo,
-                            "group_elo_means": group_elo_means,
-                            "r_sep_pairwise_winrate": r_sep_pairwise_winrate,
-                        }
-                        if r_sep_elo is not None
-                        else {}
-                    ),
                     **(
                         {
                             "num_solutions_verified": len(verification_rows),
@@ -2136,8 +1584,27 @@ def main() -> None:
                             "enabled": True,
                             "provider": strong_provider,
                             "model": strong_model,
+                            "mode": strong_mode,
                             "answer": oracle_answer,
                             "error": oracle_error,
+                            "question_check_enabled": strong_check_question_validity,
+                            "question_check_valid": oracle_question_valid,
+                            "question_check_error": oracle_question_check_error,
+                            **(
+                                {"question_check_raw_response": oracle_question_check_raw}
+                                if include_judge_traces and oracle_question_check_raw is not None
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "solution_verdicts": {
+                                        str(k): ("CORRECT" if v else "INCORRECT")
+                                        for k, v in (oracle_solution_verdicts or {}).items()
+                                    }
+                                }
+                                if oracle_solution_verdicts is not None
+                                else {}
+                            ),
                             **({"raw_response": oracle_raw_response} if include_judge_traces else {}),
                         }
                     }
