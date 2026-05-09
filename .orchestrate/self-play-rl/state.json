@@ -85,11 +85,11 @@
       "finishedAt": null,
       "lastUpdate": "2026-05-09T20:43:07.988Z",
       "note": null,
+      "attempts": 1,
       "slackTs": null,
       "prNumber": null,
       "failureMode": null,
-      "verification": null,
-      "attempts": 1
+      "verification": null
     },
     {
       "name": "verify-qwen-verdict-rl-loop",
@@ -175,6 +175,14 @@
     {
       "at": "2026-05-09T20:00:02.095Z",
       "message": "verify-rl-loop-smoke: spawn failed after 3 transient sub-attempts: l: [usage_limit_exceeded] Usage-based pricing required. Background Agent requires at least $2 remaining until your hard limit. Enable usage-based pricing and set a Spend Limit at https://www.cursor.co…"
+    },
+    {
+      "at": "2026-05-09T21:00:26.665Z",
+      "message": "qwen-verdict-rl-loop: SSE idle 329267ms, polled status=running; watchdog still waiting"
+    },
+    {
+      "at": "2026-05-09T21:00:26.666Z",
+      "message": "qwen-verdict-rl-loop: tool_call idle 329268ms; last=2026-05-09T20:54:57.398Z"
     }
   ]
 }
