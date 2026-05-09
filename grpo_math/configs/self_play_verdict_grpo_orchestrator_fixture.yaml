@@ -1,0 +1,24 @@
+iteration: 0
+
+loop:
+  iterations: 2
+
+rollout:
+  enabled: true
+  module: grpo_math.self_play.collect_self_play_rollouts
+  config: grpo_math/configs/self_play_verdict_grpo_fixture.yaml
+
+solver_train:
+  enabled: true
+  module: grpo_math.trl.train_solver_verdict_grpo
+  config: grpo_math/configs/train_solver_verdict_grpo_smoke.yaml
+
+proposer_train:
+  enabled: true
+  module: grpo_math.trl.train_proposer_question_grpo
+  config: grpo_math/configs/train_proposer_question_grpo_smoke.yaml
+
+evaluation:
+  enabled: true
+  module: grpo_math.eval.eval_gsm8k
+  config: grpo_math/configs/train_smoke_trl.yaml

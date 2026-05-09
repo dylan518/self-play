@@ -1,0 +1,127 @@
+seed: 2026050901
+debug_timing: true
+
+pairwise:
+  num_questions: 30
+  enabled: false
+  max_pairs_per_question: 0
+  elo_k_factor: 24.0
+  elo_initial_rating: 1000.0
+
+generator:
+  api_provider: "openai"
+  api_model: "Qwen/Qwen3.5-9B"
+  api_tokenizer_name_or_path: "Qwen/Qwen3.5-9B"
+  api_base_url: "https://api.together.xyz/v1"
+  api_key_env: "TOGETHER_API_KEY"
+  api_reasoning_effort: ""
+  api_max_tokens_param: "max_tokens"
+  api_extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+  api_timeout_s: 120
+  api_min_interval_s: 0.0
+  api_max_retries: 8
+  api_backoff_initial_s: 1.0
+  api_max_parallel: 4
+  use_chat_template: false
+  enable_thinking: false
+  prompt_template_path: "grpo_math/prompts/question_generator_prompt.txt"
+  question_bank:
+    enabled: true
+    path: "examples.json"
+    num_examples: 5
+    compatible_only: true
+    recent_jsonl_path: "outputs/pairwise_rollouts_debug/samples_qwen35_9b_together_single_verify_mini.jsonl"
+    recent_num_examples: 2
+  prompt_suffix: |
+    Additional hard constraints for this run:
+    - The question must have exactly one final answer.
+    - The final answer must be a single integer.
+    - Do not ask for code, a function, a proof, a list of all objects, a poem, or a yes/no answer.
+    - Prefer problems checkable by short arithmetic, finite enumeration, modular arithmetic, or simple algebra.
+  temperature: 1.0
+  top_p: 0.9
+  max_new_tokens: 768
+  batch_size: 1
+  max_retries_per_question: 8
+
+solver:
+  api_provider: "openai"
+  api_model: "Qwen/Qwen3.5-9B"
+  api_base_url: "https://api.together.xyz/v1"
+  api_key_env: "TOGETHER_API_KEY"
+  api_reasoning_effort: ""
+  api_max_tokens_param: "max_tokens"
+  api_extra_body:
+    chat_template_kwargs:
+      enable_thinking: true
+      thinking_budget: 512
+  include_reasoning_in_output: true
+  api_final_max_tokens: 2048
+  api_timeout_s: 180
+  api_min_interval_s: 0.0
+  api_max_retries: 8
+  api_backoff_initial_s: 0.5
+  api_max_parallel: 12
+  use_chat_template: false
+  enable_thinking: false
+  num_solutions_per_question: 6
+  sampling_groups:
+    - count: 3
+      temperature: 0.2
+      top_p: 0.85
+    - count: 3
+      temperature: 1.4
+      top_p: 1.0
+  prompt_template: |
+    Question:
+    {question}
+
+    Think through the solution, then when you begin the final response, put the answer first.
+    The final response must start with this exact line:
+    FINAL_ANSWER: <integer>
+    After that line, you may include a brief check if needed.
+  temperature: 1.0
+  top_p: 0.95
+  max_new_tokens: 12000
+  batch_size: 1
+  batch_across_questions: true
+
+judge:
+  mode: "single_verify"
+  batch_verify_all_solutions: false
+  verify_prompt_template_path: "grpo_math/prompts/single_solution_verify_prompt.txt"
+  api_provider: "openai"
+  api_model: "Qwen/Qwen3.5-9B"
+  api_base_url: "https://api.together.xyz/v1"
+  api_key_env: "TOGETHER_API_KEY"
+  api_reasoning_effort: ""
+  api_max_tokens_param: "max_tokens"
+  api_extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+  api_timeout_s: 180
+  api_min_interval_s: 0.0
+  api_max_retries: 8
+  api_backoff_initial_s: 0.5
+  api_max_parallel: 12
+  use_chat_template: false
+  enable_thinking: false
+  prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
+  repeats_per_pair: 1
+  repeats_per_solution: 5
+  temperature: 0.2
+  top_p: 1.0
+  max_new_tokens: 4096
+  batch_size: 1
+  python_assisted: true
+  python_timeout_s: 5
+
+output:
+  include_judge_traces: true
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_qwen35_9b_together_single_verify_quality_pilot.jsonl"
+  write_mode: "append"
+
+strong_verifier:
+  enabled: false

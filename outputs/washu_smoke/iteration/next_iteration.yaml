@@ -1,0 +1,121 @@
+provider_type: fixture
+rollout:
+  enabled: true
+  module: grpo_math.self_play.collect_self_play_rollouts
+  config: grpo_math/configs/self_play_verdict_grpo_fixture.yaml
+  iteration_id: local_fixture_iter_000
+  num_solver_completions: 4
+fixture:
+  proposer:
+    prompts:
+    - id: arithmetic_prompt
+      prompt: Generate grade-school arithmetic word problems with integer answers.
+      questions:
+      - What is 12 plus 7?
+      - Lena has 18 marbles and gives 5 away. How many marbles does Lena have?
+      - Compute 6 times 5?
+    - id: word_problem_prompt
+      prompt: Generate short integer-answer math word problems.
+      questions:
+      - Maya has 9 stickers and buys 4 more. How many stickers does Maya have?
+      - 'ANSWER: 13. What is 8 plus 5?'
+  solver:
+    default_completions:
+    - '12 + 7 = 19
+
+      FINAL_ANSWER: 19'
+    - 'Adding gives 18.
+
+      FINAL_ANSWER: 18'
+    - 'The result is 19.
+
+      FINAL_ANSWER: 19'
+    - 'I get twenty.
+
+      FINAL_ANSWER: 20'
+    completions_by_question_id:
+      arithmetic_prompt_q001:
+      - '18 - 5 = 13
+
+        FINAL_ANSWER: 13'
+      - 'She has 12 left.
+
+        FINAL_ANSWER: 12'
+      - 'Lena keeps 13 marbles.
+
+        FINAL_ANSWER: 13'
+      - '18 plus 5 is 23.
+
+        FINAL_ANSWER: 23'
+      arithmetic_prompt_q002:
+      - '6 * 5 = 30
+
+        FINAL_ANSWER: 30'
+      - 'Six fives are thirty.
+
+        FINAL_ANSWER: 30'
+      - 'I mistakenly add them.
+
+        FINAL_ANSWER: 11'
+      - 'The product is 30.
+
+        FINAL_ANSWER: 30'
+      word_problem_prompt_q000:
+      - '9 + 4 = 13
+
+        FINAL_ANSWER: 13'
+      - 'She has 14.
+
+        FINAL_ANSWER: 14'
+      - 'Maya has 13 stickers.
+
+        FINAL_ANSWER: 13'
+      - 'The total is 13.
+
+        FINAL_ANSWER: 13'
+  verifier:
+    default_verdicts:
+    - CORRECT
+    - INCORRECT
+    - CORRECT
+    - INCORRECT
+    verdicts_by_question_id:
+      arithmetic_prompt_q001:
+      - CORRECT
+      - INCORRECT
+      - CORRECT
+      - INCORRECT
+      arithmetic_prompt_q002:
+      - CORRECT
+      - CORRECT
+      - INCORRECT
+      - CORRECT
+      word_problem_prompt_q000:
+      - CORRECT
+      - INCORRECT
+      - CORRECT
+      - CORRECT
+output:
+  rollout_jsonl_path: outputs/self_play_fixture/rollouts.jsonl
+  rejected_jsonl_path: outputs/self_play_fixture/rejected_questions.jsonl
+  overwrite: true
+  include_summary: true
+iteration: 1
+loop:
+  iterations: 2
+solver_train:
+  enabled: true
+  module: grpo_math.trl.train_solver_verdict_grpo
+  config: grpo_math/configs/train_solver_verdict_grpo_smoke.yaml
+proposer_train:
+  enabled: true
+  module: grpo_math.trl.train_proposer_question_grpo
+  config: grpo_math/configs/train_proposer_question_grpo_smoke.yaml
+evaluation:
+  enabled: true
+  module: grpo_math.eval.eval_gsm8k
+  config: grpo_math/configs/train_smoke_trl.yaml
+resume_from: outputs/washu_smoke/iteration
+initial_checkpoints:
+  solver: outputs/washu_smoke/iteration/solver
+  proposer: outputs/washu_smoke/iteration/proposer

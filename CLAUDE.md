@@ -5,11 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 **Lint:**
+
 ```bash
 ruff check .
 ```
 
 **Tests:**
+
 ```bash
 python -m pytest tests/test_reward.py
 python -m pytest tests/test_logprobs.py
@@ -17,16 +19,19 @@ python -m pytest tests/test_left_padding_masking.py
 ```
 
 **Pairwise rollout (smoke test):**
+
 ```bash
 python -m grpo_math.self_play.generate_pairwise_data --config grpo_math/configs/pairwise_rollouts_smoke.yaml
 ```
 
 **Debug rollout with reset:**
+
 ```bash
 python tests/debug_single_pairwise_rollout.py --config grpo_math/configs/pairwise_rollouts_debug.yaml --reset-output
 ```
 
 **Training:**
+
 ```bash
 # Single GPU
 python -m grpo_math.trl.train_grpo_trl --config grpo_math/configs/train_gsm8kv2_trl.yaml
@@ -36,6 +41,7 @@ accelerate launch -m grpo_math.trl.train_grpo_trl --config grpo_math/configs/tra
 ```
 
 **Evaluation:**
+
 ```bash
 python -m grpo_math.eval.eval_gsm8k --config grpo_math/configs/train_gsm8kv2_trl.yaml --checkpoint <path> --max_samples 1000 --k 4
 ```
@@ -47,11 +53,12 @@ This is a self-improving training loop for math reasoning with three roles: **Ge
 ### Core loop (`grpo_math/self_play/generate_pairwise_data.py`)
 
 The main orchestration file (~1300 lines). Each rollout:
+
 1. Samples questions from the generator model
 2. Generates K solutions per question in configurable sampling groups (different temperatures/models to create quality variation)
 3. Judges solution pairs in one of two modes:
-   - `pairwise` — judge compares A vs B directly, outputs `PREFERENCE:`
-   - `single_verify` — judge grades each solution individually (`VERDICT: CORRECT/INCORRECT`), with optional `CONFIDENCE:` tracing
+  - `pairwise` — judge compares A vs B directly, outputs `PREFERENCE:`
+  - `single_verify` — judge grades each solution individually (`VERDICT: CORRECT/INCORRECT`), with optional `CONFIDENCE:` tracing
 4. Computes Elo ratings from comparison outcomes
 5. Saves results to JSONL (append or overwrite)
 
@@ -60,6 +67,7 @@ The judge can be a local HuggingFace model or any OpenAI-compatible API (GPT-4, 
 ### Reliability metrics (see `README.md`)
 
 Three metrics gate which questions enter training:
+
 - **R_cons**: score consistency — low variance across repeated judging
 - **R_sep**: strong/weak separation — better sampling regimes should win more often
 - **R_stab**: preference stability — pairwise judgments agree on re-run
@@ -67,6 +75,7 @@ Three metrics gate which questions enter training:
 ### Reward and format (`grpo_math/data/reward.py`)
 
 All solver outputs must end with `FINAL_ANSWER: <integer>` (strict). Two reward signals:
+
 - **Correctness**: `binary_reward()` via `extract_final_answer_int_strict()`
 - **Format**: presence of the `FINAL_ANSWER:` tag
 

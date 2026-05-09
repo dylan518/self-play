@@ -1,0 +1,254 @@
+{
+    "categories": {
+      "algebra": [
+        {
+          "task": "Solve nonlinear system",
+          "question": "Solve for all real solutions: x^2 + y^2 = 25 and y = x + 1",
+          "verification": "Substitute solutions into both equations with SymPy"
+        },
+        {
+          "task": "Parameter reasoning",
+          "question": "Find all values of k such that the equation x^2 + kx + 9 = 0 has exactly one real solution",
+          "verification": "Check discriminant equals zero"
+        },
+        {
+          "task": "Recurrence relation",
+          "question": "Given a_1 = 3 and a_{n+1} = 2a_n + 5, derive a closed-form expression for a_n",
+          "verification": "Compare generated formula against recurrence for random n"
+        },
+        {
+          "task": "Functional equation",
+          "question": "Find all functions f(x) satisfying f(x+y)=f(x)+f(y) and f(1)=2 over the integers",
+          "verification": "Check generated rule on randomized integer pairs"
+        }
+      ],
+      "symbolic_manipulation": [
+        {
+          "task": "Symbolic simplification",
+          "question": "Simplify: ((x^2 - 1)/(x - 1)) - ((x^2 - 4)/(x - 2))",
+          "verification": "Check symbolic equivalence with SymPy"
+        },
+        {
+          "task": "Implicit differentiation",
+          "question": "Given x^2 + y^2 = 25, derive dy/dx",
+          "verification": "Differentiate symbolically and compare"
+        },
+        {
+          "task": "Series expansion",
+          "question": "Compute the second-order Taylor expansion of e^x around x = 0",
+          "verification": "Compare coefficients"
+        },
+        {
+          "task": "Integral transformation",
+          "question": "Evaluate ∫(x ln(x)) dx",
+          "verification": "Differentiate proposed solution and compare to integrand"
+        }
+      ],
+      "logic": [
+        {
+          "task": "Knights and knaves",
+          "question": "A says: 'B is a knave.' B says: 'We are of opposite types.' Determine who is a knight and who is a knave.",
+          "verification": "Brute-force all truth assignments"
+        },
+        {
+          "task": "Constraint deduction",
+          "question": "Three switches control three bulbs in another room. You may enter the bulb room only once. Determine which switch controls which bulb.",
+          "verification": "Check logical consistency against hidden mapping"
+        },
+        {
+          "task": "Grid logic",
+          "question": "Fill a 4x4 Latin square with symbols A-D such that each appears exactly once per row and column.",
+          "verification": "Exact constraint satisfaction"
+        },
+        {
+          "task": "Boolean reasoning",
+          "question": "Determine whether the formula ((A → B) ∧ (B → C)) → (A → C) is always true.",
+          "verification": "Generate full truth table"
+        }
+      ],
+      "mini_coding": [
+        {
+          "task": "Dynamic programming",
+          "question": "Write a function that returns the minimum number of coins needed to make a target value from a list of coin denominations.",
+          "verification": "Hidden unit tests and brute-force comparison"
+        },
+        {
+          "task": "Graph algorithms",
+          "question": "Write a function that determines whether a graph contains a cycle.",
+          "verification": "Random graph generation and oracle comparison"
+        },
+        {
+          "task": "Parsing",
+          "question": "Write a function that validates whether parentheses in a string are balanced.",
+          "verification": "Randomized fuzz testing"
+        },
+        {
+          "task": "Search",
+          "question": "Write a function that finds the longest palindromic substring in a given string.",
+          "verification": "Compare against brute-force implementation"
+        }
+      ]
+    },
+    "tasks_extended": [
+      {
+        "category": "algebra",
+        "question": "Find all real solutions to x^4 - 5x^2 + 4 = 0",
+        "verification": "Substitute roots and compare numerically"
+      },
+      {
+        "category": "algebra",
+        "question": "Solve for x: 2^(x+1) = 16^(x-1)",
+        "verification": "Symbolic simplification and substitution"
+      },
+      {
+        "category": "algebra",
+        "question": "Find the vertex of the parabola y = 3x^2 - 12x + 7",
+        "verification": "Check against quadratic formula derivation"
+      },
+      {
+        "category": "algebra",
+        "question": "Determine all integer solutions to x + y = 10 and xy = 21",
+        "verification": "Brute-force integer search"
+      },
+      {
+        "category": "symbolic_manipulation",
+        "question": "Factor completely: x^3 - 6x^2 + 11x - 6",
+        "verification": "Expand proposed factors"
+      },
+      {
+        "category": "symbolic_manipulation",
+        "question": "Simplify: (x^3y^2)^2 / (xy)^3",
+        "verification": "Canonical symbolic simplification"
+      },
+      {
+        "category": "symbolic_manipulation",
+        "question": "Differentiate: sin(x^2)e^x",
+        "verification": "Symbolic derivative comparison"
+      },
+      {
+        "category": "symbolic_manipulation",
+        "question": "Compute the indefinite integral of 1/(1+x^2)",
+        "verification": "Differentiate candidate answer"
+      },
+      {
+        "category": "logic",
+        "question": "Five people sit in a row. Alice is left of Bob. Charlie is right of Dana. Bob is not adjacent to Charlie. Determine one valid arrangement.",
+        "verification": "Constraint checking"
+      },
+      {
+        "category": "logic",
+        "question": "A box contains either only red balls or only blue balls. Statement A says 'The box contains red balls.' Statement B says 'Statement A is false.' Which statements are true?",
+        "verification": "Truth assignment enumeration"
+      },
+      {
+        "category": "logic",
+        "question": "There are three doors. One leads to freedom, two to traps. Guards may lie or tell the truth. Formulate a question guaranteeing the correct door.",
+        "verification": "Evaluate strategy across all truth assignments"
+      },
+      {
+        "category": "logic",
+        "question": "Determine whether the following argument is valid: 'If it rains, the ground gets wet. The ground is wet. Therefore it rained.'",
+        "verification": "Truth table analysis"
+      },
+      {
+        "category": "mini_coding",
+        "question": "Write a function that merges two sorted arrays into one sorted array.",
+        "verification": "Randomized unit testing"
+      },
+      {
+        "category": "mini_coding",
+        "question": "Write a function that computes the nth Fibonacci number efficiently.",
+        "verification": "Hidden tests and asymptotic runtime checks"
+      },
+      {
+        "category": "mini_coding",
+        "question": "Write a function that returns the first non-repeating character in a string.",
+        "verification": "Fuzz testing against oracle implementation"
+      },
+      {
+        "category": "mini_coding",
+        "question": "Write a function that determines whether two strings are anagrams.",
+        "verification": "Randomized string generation"
+      },
+      {
+        "category": "optimization",
+        "question": "Given item weights and values, choose items maximizing value without exceeding capacity 15.",
+        "verification": "Brute-force knapsack solver"
+      },
+      {
+        "category": "optimization",
+        "question": "Find the shortest path between two nodes in a weighted graph.",
+        "verification": "Compare against Dijkstra implementation"
+      },
+      {
+        "category": "fermi_reasoning",
+        "question": "Estimate the number of piano tuners in a city with population 800,000 using explicit assumptions.",
+        "verification": "Compare against hidden simulator-generated estimate"
+      },
+      {
+        "category": "constrained_poetry",
+        "question": "Write a four-line poem with ABAB rhyme scheme, exactly 8 syllables per line, containing the words 'clock' and 'winter'.",
+        "verification": "Syllable counting, rhyme detection, keyword checks"
+      },
+      {
+        "category": "entity_reconstruction",
+        "question": "A person was born in the capital of the country that borders both the Caspian Sea and the Persian Gulf. They won a major international prize in a year that is a prime number between 2000 and 2010. Identify the person and the year they won.",
+        "verification": "Python: Identify country (Iran), capital (Tehran), and prime years (2003). Match name 'Shirin Ebadi' and year 2003."
+      },
+      {
+        "category": "linguistic_constraint_poetry",
+        "question": "Write a four-line poem about a 'Mirror'. The first word of each line must be a synonym for 'Look'. Each line must have an increasing word count (Line 1 has 3 words, Line 2 has 4, etc.), and the letter 'e' cannot be used in the final line.",
+        "verification": "Python: Verify synonyms (Gaze, Stare, Watch, etc.), check word counts (3, 4, 5, 6), and verify 'e' is absent in the fourth string."
+      },
+      {
+        "category": "black_box_reverse_engineering",
+        "question": "Observe the transformation: 'APPLE' -> 'ELPPA' -> 'FMPQB'; 'TASK' -> 'KSAT' -> 'LTBU'. Based on this two-step process, what does 'REASON' become?",
+        "verification": "Python: Step 1 is string reversal; Step 2 is a Caesar shift of +1. Result for 'REASON' should be 'OPSBFT'."
+      },
+      {
+        "category": "reverse_input_discovery",
+        "question": "Find a valid 6-letter English word that, when each letter is replaced by its position in the alphabet (A=1), the sum of the positions is exactly 50. Additionally, the word must remain a valid English word if the first letter is removed.",
+        "verification": "Python: `sum(ord(c)-96 for c in word) == 50` and verify `word[1:]` is in dictionary (e.g., 'Bland' -> 'land' logic)."
+      },
+      {
+        "category": "lateral_constraint_satisfaction",
+        "question": "Write a Python function to find the intersection of two lists, but you are forbidden from using 'set', '&', 'intersection', or any loops ('for' or 'while').",
+        "verification": "Python: Use `ast` to ensure forbidden keywords/nodes are absent. Verify logic using recursion or `filter`."
+      },
+      {
+        "category": "code_outcome_prediction",
+        "question": "What is the final value of 'result'? `result = []; data = [lambda x: x + i for i in range(3)]; for f in data: result.append(f(10))`",
+        "verification": "Python: Execute code and verify result is `[12, 12, 12]` due to late binding in closures."
+      },
+      {
+        "category": "invariance_refactoring",
+        "question": "Refactor this logic into a single line without using 'lambda', 'filter', or 'map': `final = []; for i in range(50): if i % 7 == 0: if i % 2 != 0: final.append(i * i)`",
+        "verification": "Python: Compare Solver's list comprehension against original logic output for $i < 50$."
+      },
+      {
+        "category": "constrained_regex_discovery",
+        "question": "Find a common English word that matches `^..t.r.$` and, when the letters are sorted alphabetically, the resulting string is exactly 'aeilorst'.",
+        "verification": "Python: `re.match` check and `''.join(sorted(word)) == 'aeilorst'` (Target: 'tailors')."
+      },
+      {
+        "category": "entity_reconstruction",
+        "question": "Start at the city known as 'The Big Apple'. Travel to the capital of the country that gifted the statue in that city's harbor. Identify the name of the river that flows through that capital and the number of bridges crossing it within city limits.",
+        "verification": "Python: Sequence: NYC -> France -> Paris -> Seine. Verify river name 'Seine' and bridge count (37)."
+      },
+      {
+        "category": "code_outcome_prediction",
+        "question": "Predict the final state of 'd': `d = {'a': 1}; d.update(d); d['a'] = d.get('b', 0) + 5; d.pop('a') if d['a'] > 4 else None; d = bool(d)`",
+        "verification": "Python: Execute steps: update does nothing new, d['a'] becomes 5, 'a' is popped, d becomes empty dictionary, bool({}) is False."
+      },
+      {
+        "category": "black_box_reverse_engineering",
+        "question": "If '3, 4, 5' -> 6 and '5, 12, 13' -> 30 and '8, 15, 17' -> 60, what is the output for '7, 24, 25'?",
+        "verification": "Python: Logic is the area of a right triangle with given side lengths $(\\frac{1}{2} \\times base \\times height)$. Result: 84."
+      },
+      {
+        "category": "lateral_constraint_satisfaction",
+        "question": "Explain the 'Prisoner's Dilemma' using a total of exactly 50 words. The words 'jail', 'prison', and 'police' are forbidden.",
+        "verification": "Python: `len(text.split()) == 50` and check for forbidden substrings."
+      }
+    ]
+  }

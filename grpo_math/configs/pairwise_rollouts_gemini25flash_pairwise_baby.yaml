@@ -1,0 +1,101 @@
+seed: 1234
+debug_timing: true
+
+pairwise:
+  # Baby experiment: a few questions, enough comparisons for Elo to spread.
+  num_questions: 3
+  # 0 => all pairs
+  max_pairs_per_question: 0
+  elo_k_factor: 24.0
+  elo_initial_rating: 1000.0
+
+generator:
+  api_provider: "openai"
+  api_model: "gemini-2.5-flash"
+  api_base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+  api_key_env: "GEMINI_API_KEY"
+  api_reasoning_effort: "none"
+  api_max_tokens_param: "max_tokens"
+  api_timeout_s: 90
+  api_min_interval_s: 1.0
+  api_max_retries: 12
+  api_backoff_initial_s: 2.0
+  api_max_parallel: 1
+  use_chat_template: false
+  enable_thinking: false
+  prompt_template_path: "grpo_math/prompts/question_generator_prompt.txt"
+  temperature: 1.05
+  top_p: 0.9
+  max_new_tokens: 512
+  batch_size: 1
+  max_retries_per_question: 20
+
+solver:
+  api_provider: "openai"
+  api_model: "gemini-2.5-flash"
+  api_base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+  api_key_env: "GEMINI_API_KEY"
+  api_reasoning_effort: "none"
+  api_max_tokens_param: "max_tokens"
+  api_timeout_s: 90
+  api_min_interval_s: 0.0
+  api_max_retries: 8
+  api_backoff_initial_s: 0.5
+  api_max_parallel: 30
+  use_chat_template: false
+  enable_thinking: false
+  num_solutions_per_question: 6
+  sampling_groups:
+    # Group 0: stronger / lower temp
+    - count: 3
+      temperature: 0.25
+      top_p: 0.85
+    # Group 1: weaker / higher temp
+    - count: 3
+      temperature: 1.6
+      top_p: 1.0
+  prompt_template: |
+    Question:
+    {question}
+
+    Solve step by step. Use plain text only, no LaTeX, no markdown.
+    Keep your entire response under 30 lines.
+    Your last line must be exactly:
+    FINAL_ANSWER: <integer>
+  temperature: 1.0
+  top_p: 0.95
+  max_new_tokens: 1536
+  batch_size: 1
+  batch_across_questions: true
+
+judge:
+  mode: "pairwise"
+  api_provider: "openai"
+  api_model: "gemini-2.5-flash"
+  api_base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+  api_key_env: "GEMINI_API_KEY"
+  api_reasoning_effort: "none"
+  api_max_tokens_param: "max_tokens"
+  api_timeout_s: 90
+  api_min_interval_s: 0.0
+  api_max_retries: 8
+  api_backoff_initial_s: 0.5
+  api_max_parallel: 30
+  use_chat_template: false
+  enable_thinking: false
+  prompt_template_path: "grpo_math/prompts/pairwise_judge_prompt.txt"
+  repeats_per_pair: 3
+  randomize_a_b_order: true
+  balanced_a_b_order: true
+  temperature: 0.0
+  top_p: 1.0
+  max_new_tokens: 64
+  batch_size: 1
+
+output:
+  include_judge_traces: true
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_gemini25flash_pairwise_baby.jsonl"
+  write_mode: "overwrite"
+
+strong_verifier:
+  enabled: false

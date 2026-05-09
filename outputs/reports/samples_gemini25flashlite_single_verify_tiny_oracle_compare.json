@@ -1,0 +1,205 @@
+{
+  "accuracy": 0.4166666666666667,
+  "by_majority_bucket": {
+    "3/3": {
+      "accuracy": 0.4166666666666667,
+      "n": 12
+    }
+  },
+  "comparisons": [
+    {
+      "agrees": false,
+      "candidate_answer": "12",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING: The candidate $n=12$ satisfies $2^{12} \\equiv (2^6)^2 \\equiv (-1)^2 \\equiv 1 \\pmod{13}$ and $3^{12} \\equiv (3^3)^4 \\equiv 1^4 \\equiv 1 \\pmod{13}$. The order of 2 modulo 13 is 12, and the order of 3 modulo 13 is 3. The smallest positive integer $n$ satisfying both conditions is $\\text{lcm}(12, 3) = 12$.",
+      "question_index": 0,
+      "solution_index": 0
+    },
+    {
+      "agrees": false,
+      "candidate_answer": "12",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING: The candidate $n=12$ satisfies $2^{12} \\equiv (2^6)^2 \\equiv (-1)^2 \\equiv 1 \\pmod{13}$ and $3^{12} \\equiv (3^3)^4 \\equiv 1^4 \\equiv 1 \\pmod{13}$. The order of 2 modulo 13 is 12, and the order of 3 modulo 13 is 3. The smallest positive integer $n$ satisfying both conditions is $\\text{lcm}(12, 3) = 12$.",
+      "question_index": 0,
+      "solution_index": 1
+    },
+    {
+      "agrees": false,
+      "candidate_answer": "12",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING: The candidate $n=12$ satisfies $2^{12} \\equiv (2^6)^2 \\equiv (-1)^2 \\equiv 1 \\pmod{13}$ and $3^{12} \\equiv (3^3)^4 \\equiv 1^4 \\equiv 1 \\pmod{13}$. The order of 2 modulo 13 is 12, and the order of 3 modulo 13 is 3. The smallest positive integer $n$ satisfying both conditions is $\\text{lcm}(12, 3) = 12$.",
+      "question_index": 0,
+      "solution_index": 2
+    },
+    {
+      "agrees": false,
+      "candidate_answer": "12",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING: The candidate $n=12$ satisfies $2^{12} \\equiv (2^6)^2 \\equiv (-1)^2 \\equiv 1 \\pmod{13}$ and $3^{12} \\equiv (3^3)^4 \\equiv 1^4 \\equiv 1 \\pmod{13}$. The order of 2 modulo 13 is 12, and the order of 3 modulo 13 is 3. The smallest positive integer $n$ satisfying both conditions is $\\text{lcm}(12, 3) = 12$.",
+      "question_index": 0,
+      "solution_index": 3
+    },
+    {
+      "agrees": false,
+      "candidate_answer": null,
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING: We compute powers of 2 modulo 23: 2^1=2, 2^2=4, 2^3=8, 2^4=16, 2^5=9, 2^6=18, 2^7=13, 2^8=3, 2^9=6, 2^10=12, 2^11=1. The order of 2 modulo 23 is 11. The value 17 does not appear in the cycle of powers of 2 modulo 23. Thus, no such positive integer n exists.",
+      "question_index": 1,
+      "solution_index": 0
+    },
+    {
+      "agrees": false,
+      "candidate_answer": null,
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING: We compute powers of 2 modulo 23: 2^1=2, 2^2=4, 2^3=8, 2^4=16, 2^5=9, 2^6=18, 2^7=13, 2^8=3, 2^9=6, 2^10=12, 2^11=1. The cycle of powers of 2 modulo 23 is {2, 4, 8, 16, 9, 18, 13, 3, 6, 12, 1}. The value 17 is not present in this set. Therefore, no such positive integer n exists.",
+      "question_index": 1,
+      "solution_index": 1
+    },
+    {
+      "agrees": false,
+      "candidate_answer": "17",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "INVALID",
+      "oracle_raw_text": "VERDICT: INVALID\nCONFIDENCE: 1.0\nREASONING: The question asks for the smallest positive integer 'n'. The candidate answer is a statement explaining a difficulty, not an integer value for 'n'. Therefore, it does not answer the question in the required format.",
+      "question_index": 1,
+      "solution_index": 2
+    },
+    {
+      "agrees": true,
+      "candidate_answer": "17",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "INCORRECT",
+      "oracle_raw_text": "VERDICT: INCORRECT\nCONFIDENCE: 1.0\nREASONING: We calculate 2^17 modulo 23.\n2^17 % 23 = 18 (using modular exponentiation, e.g., `pow(2, 17, 23)` in Python).\nSince 18 is not equal to 17, the candidate answer n=17 does not satisfy the condition 2^n \u2261 17 (mod 23).",
+      "question_index": 1,
+      "solution_index": 3
+    },
+    {
+      "agrees": true,
+      "candidate_answer": "371",
+      "local_label": "CORRECT",
+      "local_votes": [
+        "CORRECT",
+        "CORRECT",
+        "CORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING:\n1. Sum of cubes of digits: 3^3 + 7^3 + 1^3 = 27 + 343 + 1 = 371. This matches n.\n2. Divisibility by 7: 371 / 7 = 53. So, 371 is divisible by 7.\n3. Smallest positive integer: Known Armstrong numbers (sum of cubes of digits equals n) smaller than 371 are 1, 153, 370. None of these are divisible by 7 (1%7!=0, 153%7!=0, 370%7!=0). Thus, 371 is the smallest.",
+      "question_index": 2,
+      "solution_index": 0
+    },
+    {
+      "agrees": true,
+      "candidate_answer": "371",
+      "local_label": "CORRECT",
+      "local_votes": [
+        "CORRECT",
+        "CORRECT",
+        "CORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING:\n1. Sum of cubes of digits: 3^3 + 7^3 + 1^3 = 27 + 343 + 1 = 371. This matches n.\n2. Divisibility by 7: 371 / 7 = 53. So, 371 is divisible by 7.\n3. Smallest positive integer: Known Armstrong numbers (sum of cubes of digits equals n) smaller than 371 are 1, 153, 370. None of these are divisible by 7 (1%7!=0, 153%7!=0, 370%7!=0). Thus, 371 is the smallest.",
+      "question_index": 2,
+      "solution_index": 1
+    },
+    {
+      "agrees": true,
+      "candidate_answer": "371",
+      "local_label": "CORRECT",
+      "local_votes": [
+        "CORRECT",
+        "CORRECT",
+        "CORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING:\n1. Sum of cubes of digits for 371: $3^3 + 7^3 + 1^3 = 27 + 343 + 1 = 371$. This matches n.\n2. Divisibility by 7: $371 \\div 7 = 53$, so 371 is divisible by 7.\n3. To confirm it's the smallest, known Armstrong numbers (numbers equal to the sum of the cubes of their digits) are 1, 153, 370, 371, 407. Checking these:\n   - $1 \\pmod 7 = 1 \\ne 0$\n   - $153 \\pmod 7 = 6 \\ne 0$\n   - $370 \\pmod 7 = 6 \\ne 0$\n   - $371 \\pmod 7 = 0$.\nThus, 371 is the smallest positive integer satisfying both conditions.",
+      "question_index": 2,
+      "solution_index": 2
+    },
+    {
+      "agrees": true,
+      "candidate_answer": "371",
+      "local_label": "CORRECT",
+      "local_votes": [
+        "CORRECT",
+        "CORRECT",
+        "CORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "CORRECT",
+      "oracle_raw_text": "VERDICT: CORRECT\nCONFIDENCE: 1.0\nREASONING:\n1. Sum of cubes of digits: 3^3 + 7^3 + 1^3 = 27 + 343 + 1 = 371. This matches n.\n2. Divisibility by 7: 371 / 7 = 53. So, 371 is divisible by 7.\n3. Smallest positive integer: Known Armstrong numbers (sum of cubes of digits equals n) smaller than 371 are 1, 153, 370. None of these are divisible by 7 (1%7!=0, 153%7!=0, 370%7!=0). Thus, 371 is the smallest.",
+      "question_index": 2,
+      "solution_index": 3
+    }
+  ],
+  "jsonl": "outputs/pairwise_rollouts_debug/samples_gemini25flashlite_single_verify_tiny.jsonl",
+  "n": 12
+}

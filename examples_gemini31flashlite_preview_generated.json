@@ -1,0 +1,1018 @@
+{
+  "metadata": {
+    "source": "examples.json",
+    "model": "gemini-3.1-flash-lite-preview",
+    "dotenv_path": ".env",
+    "seed": 1234,
+    "count": 200,
+    "target_count": 200,
+    "examples_per_prompt": 8,
+    "constraints": [
+      "sample from pre-existing bank as inspiration",
+      "Qwen-class models should be able to solve",
+      "easy to verify with Python"
+    ]
+  },
+  "tasks_extended": [
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits in base 10 is 49.",
+      "verification": "Python: Iterate through integers n starting from 1, check if n % 7 == 0, and verify sum(int(digit) for digit in str(n)) == 49."
+    },
+    {
+      "category": "combinatorics_logic",
+      "question": "Find the smallest positive integer that is a perfect square, a perfect cube, and a perfect fifth power, and is strictly greater than 1,000,000.",
+      "verification": "Python: Calculate the least common multiple of the exponents (2, 3, 5) which is 30. Check the smallest integer n such that n^30 > 1,000,000."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the total number of distinct ways to arrange the letters in the word 'BANANA' such that no two 'A's are adjacent.",
+      "verification": "Python: use itertools.permutations or a combinatorial formula to count valid permutations where no two 'A's are consecutive and compare to the result."
+    },
+    {
+      "category": "string_manipulation",
+      "question": "Find the smallest integer n > 100 such that the string representation of n! (n factorial) ends in exactly 25 consecutive zeros.",
+      "verification": "Use math.factorial(n) and count trailing zeros using string manipulation or repeated division by 5 to find the smallest n satisfying the condition."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the word 'SUCCESS' contain no two identical letters adjacent to each other?",
+      "verification": "Generate all unique permutations of 'SUCCESS' using itertools.permutations and a set, then filter those where no two consecutive characters are the same using a loop or regex lookahead."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the word 'BANANA' such that no two 'A's are adjacent?",
+      "verification": "Generate all permutations using itertools.permutations, filter for unique arrangements, and count those where no two indices of 'A' are consecutive."
+    },
+    {
+      "category": "discrete_math",
+      "question": "Find the number of integers between 1 and 500 (inclusive) that are divisible by 3, 5, or 7.",
+      "verification": "Python: sum(1 for i in range(1, 501) if i % 3 == 0 or i % 5 == 0 or i % 7 == 0)"
+    },
+    {
+      "category": "string_transformation",
+      "question": "Identify the transformation logic applied to these pairs and apply it to 'PYTHON': 'DOG' becomes 'G-O-D', 'BIRD' becomes 'D-R-I-B', 'FISH' becomes 'H-S-I-F'. Return the final string.",
+      "verification": "Python: Check if the string is reversed and joined with hyphens. The result for 'PYTHON' should be 'N-O-H-T-Y-P'."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that n is divisible by 7 and the sum of its digits is 14.",
+      "verification": "Iterate through integers starting from 101, check if n % 7 == 0 and sum(int(digit) for digit in str(n)) == 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' that start and end with the letter 'I'.",
+      "verification": "Python: Calculate the total permutations using the formula for permutations of a multiset and verify by generating or counting via math.factorial division."
+    },
+    {
+      "category": "string_manipulation",
+      "question": "Find the shortest possible string that contains every possible permutation of the sequence 'ABC' as a contiguous substring. What is the length of this string?",
+      "verification": "Generate all permutations of 'ABC', use a shortest common superstring algorithm or brute-force search for permutations, and verify the length is 8."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits in base 10 is equal to 35.",
+      "verification": "Iterate through multiples of 7 starting from 7, calculate the sum of digits for each, and return the first one where the sum equals 35."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of its digits is 14, and n is greater than 500.",
+      "verification": "Check if n > 500, n % 7 == 0, and sum(int(d) for d in str(n)) == 14; verify no smaller integer satisfies these conditions."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, and when n is divided by 2, 3, 4, 5, and 6, the remainder is always 1.",
+      "verification": "Python: Iterate n starting from 1 in steps of 7 and check if n % i == 1 for i in [2, 3, 4, 5, 6]."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 11, and the sum of the digits of n is equal to 22.",
+      "verification": "Check if n % 11 == 0 and sum(int(d) for d in str(n)) == 22, iterating from 1 upwards."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, while n + 2 is divisible by 9.",
+      "verification": "Iterate through positive integers n, checking divisibility conditions and if n+1 is a perfect square using integer square root check."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n mod 11 = 4 and n mod 13 = 1.",
+      "verification": "Iterate through integers starting from 1 until the conditions are met using a simple loop."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique anagrams of the word 'SUCCESS' are there?",
+      "verification": "Calculate the number of permutations using the formula n! / (n1! * n2! * ...) where n is total letters and nk are frequencies of repeating letters."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique ways can you arrange the letters in the word 'BANANA' such that no two 'A's are adjacent?",
+      "verification": "Calculate permutations using math.comb or factorial-based formula and compare against a script that generates all unique permutations and filters by the adjacency constraint."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the word 'BANANA' such that no two vowels are adjacent?",
+      "verification": "Calculate permutations of 'B', 'N', 'N' (3 items) with stars-and-bars placement of 'A', 'A', 'A' (3 items) into 4 available slots: math.comb(4, 3) * math.factorial(3) / math.factorial(2) * math.factorial(1) = 12."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 17, and the sum of its digits is equal to 17.",
+      "verification": "Iterate through multiples of 17 starting from 17, calculate the sum of digits for each, and stop at the first value where the sum is 17."
+    },
+    {
+      "category": "combinatorics_logic",
+      "question": "Consider a standard 52-card deck. How many distinct 5-card hands consist of exactly two pairs (e.g., two Queens, two 5s, and one Jack) and no other matching cards?",
+      "verification": "Calculate: (C(13, 2) * C(4, 2) * C(4, 2)) * (C(11, 1) * C(4, 1)). Python: math.comb(13, 2) * math.comb(4, 2)**2 * math.comb(11, 1) * 4"
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique anagrams of the word 'SUCCESS' exist, given that the two 'S' characters at the start and end are considered identical to the other 'S' characters in the set?",
+      "verification": "Calculate permutations using the formula n! / (n1! * n2! * ... * nk!) where n=7 and frequencies are S:3, C:2, U:1, E:1."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "A string of length 6 consists only of the characters 'A' and 'B'. How many such strings contain no two consecutive 'A's?",
+      "verification": "Python: Use a list comprehension or product from itertools to generate all 2^6 strings, filter for those containing 'AA', and count the remainder."
+    },
+    {
+      "category": "sequence_analysis",
+      "question": "Consider the sequence defined by a(n) = n^2 - 7n + 12 for n = 0, 1, 2, ... Find the sum of all values of n in the range [0, 10] for which a(n) is negative.",
+      "verification": "Python: Iterate n from 0 to 10, calculate n**2 - 7*n + 12, check if value < 0, and sum the corresponding n values."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the letters in the word 'BANANA' that do not contain the substring 'AA'.",
+      "verification": "Generate all unique permutations of 'BANANA' and count those where 'AA' is not present as a substring."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that n is a perfect square and the sum of its digits is also a perfect square.",
+      "verification": "Python: Iterate starting from 101, check if sqrt(n) is integer, then check if sum of digits of n is a perfect square."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of its digits is 14, and the product of its digits is 36.",
+      "verification": "Check if n % 7 == 0, sum([int(d) for d in str(n)]) == 14, and math.prod([int(d) for d in str(n)]) == 36. Iterate through integers starting from 1 to find the minimum."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that the two 'C's are not adjacent.",
+      "verification": "Python: Generate all unique permutations of 'SUCCESS' using itertools, filter those where 'CC' does not appear as a substring, and count the remaining items."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of the squares of its digits is a perfect square.",
+      "verification": "Iterate through integers starting from 101, calculate the sum of the squares of the digits, check if the square root of that sum is an integer, and return the first match."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Find the smallest positive integer n such that n is a multiple of 9, the product of its digits is 126, and it contains no digit equal to 1.",
+      "verification": "Python: Iterate through integers starting from 18 (first multiple of 9), check if '1' is not in str(n), calculate the product of digits via loop, and verify if product is 126 and n % 9 == 0."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a 4-bit integer n represented as a sequence of bits b3b2b1b0. Find the number of such integers where the decimal value of the integer is equal to the sum of the squares of its individual bits.",
+      "verification": "Python: Iterate through all integers from 0 to 15, convert to 4-bit binary, extract bits, and compare the integer value to the sum of the squared bits."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of the digits of n is equal to 14.",
+      "verification": "Iterate integers starting from 1, check if n % 7 == 0 and sum(int(d) for d in str(n)) == 14."
+    },
+    {
+      "category": "number_theory_puzzles",
+      "question": "Find the smallest positive integer n such that n is divisible by 7, the sum of its digits is 14, and n is a multiple of 11.",
+      "verification": "Python: Iterate integers starting from 1, check if n % 7 == 0, n % 11 == 0, and sum(int(d) for d in str(n)) == 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that the two 'S's at the beginning and end of the word do not appear consecutively in the permutation.",
+      "verification": "Calculate total permutations of the multiset {S:3, U:1, C:2, E:1} and subtract the number of permutations where 'SS' occurs as a substring using inclusion-exclusion or string counting."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of the squares of its digits is a perfect square and the number itself is divisible by the sum of its digits.",
+      "verification": "Iterate from 101 upwards, check if the sum of squares of digits is a perfect square using math.isqrt, and check if n % sum(digits) == 0."
+    },
+    {
+      "category": "constrained_word_search",
+      "question": "Find a 7-letter English word that contains no repeating letters, where the first, middle, and last letters are vowels (A, E, I, O, U), and the sum of the numerical positions of all letters in the alphabet (A=1, B=2, ...) is exactly 70.",
+      "verification": "Python: Check length is 7, all letters are unique, index 0, 3, 6 are in 'aeiou', and sum(ord(c.lower()) - 96 for c in word) == 70 against an English dictionary."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 1000 such that n is a multiple of 13 and the sum of its digits is 19.",
+      "verification": "Iterate integers starting from 1001, check if n % 13 == 0 and sum(int(d) for d in str(n)) == 19."
+    },
+    {
+      "category": "string_manipulation",
+      "question": "Write a function that takes a string and returns a new string where every consonant is replaced by the next consonant in the alphabet (e.g., 'b' becomes 'c', 'c' becomes 'd'), while keeping vowels and case unchanged.",
+      "verification": "Define a mapping of consonants, apply the function to a test string, and verify the output against a hardcoded expected transformation."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of the digits of n is 14.",
+      "verification": "Check if n % 7 == 0 and sum(int(d) for d in str(n)) == 14 for increasing integers starting from 1."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n modulo 1000 is equal to 872.",
+      "verification": "Python: Iterate n from 1 to 1000 and check `pow(2, n, 1000) == 872`."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 1000 such that n is divisible by 7 and the sum of its digits is equal to 20.",
+      "verification": "Iterate integers starting from 1001, check if n % 7 == 0 and sum(int(d) for d in str(n)) == 20."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a 4x4 grid. A path starts at the top-left cell (0,0) and ends at the bottom-right cell (3,3). The allowed moves are only one step right or one step down at a time. Excluding paths that pass through the cell (1,1), how many unique paths exist from the start to the end?",
+      "verification": "Python: Calculate total paths using combinations C(6, 3), calculate paths passing through (1,1) by multiplying C(2,1)*C(4,2), and subtract the latter from the former."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n is congruent to 1 modulo 127.",
+      "verification": "Python: Iterate through n starting from 1 and check if pow(2, n, 127) == 1."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' where no two 'S' characters are adjacent.",
+      "verification": "Generate all permutations of the string using itertools.permutations, filter for uniqueness, and count the subset where no two 'S' indices are consecutive."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the word 'LEVEL' such that no two 'L's are adjacent?",
+      "verification": "Generate all unique permutations of 'LEVEL' and count those where no two 'L's are adjacent using string indexing."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of the squares of its digits is a perfect square, and the integer itself is divisible by 7.",
+      "verification": "Python: Iterate from 101 upwards, check if n % 7 == 0 and if the sum of squares of digits is a perfect square using math.isqrt."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct strings of length 5 can be formed using only the letters 'A', 'B', and 'C' such that no two adjacent letters are the same?",
+      "verification": "Use a recursive function with memoization or a simple loop to count strings of length 5 where `s[i] != s[i-1]` for all `i > 0`."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square of an integer, where n is greater than 100.",
+      "verification": "Iterate through integers starting from 101, check if n % 7 == 0 and if round(sqrt(n + 1))**2 == n + 1."
+    },
+    {
+      "category": "combinatorics_logic",
+      "question": "Consider a string of length 6 consisting only of the characters 'A' and 'B'. How many such strings exist where the substring 'AA' never appears?",
+      "verification": "Python: Use a list comprehension to generate all 2^6 strings, filter for those containing 'AA', and return the length of the remaining list."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct anagrams of the word 'SUCCESS' can be formed such that the two 'S's at the beginning of the word do not appear consecutively?",
+      "verification": "Calculate the total permutations of 'SUCCESS' (7! / (3!*2!)) and subtract the permutations where the first two letters are 'SS' (5! / 2!) using Python's math.factorial."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the smallest positive integer n such that the sum of the digits of n is 45 and the product of the digits of n is 0.",
+      "verification": "Python: Iterate integers starting from 1, check if product of digits is 0 and sum of digits is 45, stop at the first match."
+    },
+    {
+      "category": "combinatorial_search",
+      "question": "Find the smallest positive integer n such that the sum of its digits is equal to the product of its digits, and the number itself is greater than 100.",
+      "verification": "Python: Iterate from 101 upwards, calculate digit product and sum, return the first integer where they are equal."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the string 'banana' contain no two identical letters adjacent to each other?",
+      "verification": "Generate all permutations of 'banana', filter those where no two identical characters are adjacent, and return the count."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that n is a multiple of 7, the sum of its digits is 14, and n is a prime number minus 1.",
+      "verification": "Python: iterate n starting from 101, check n % 7 == 0, sum(int(d) for d in str(n)) == 14, and (n + 1) is prime using a primality test."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can the letters of the word 'SUCCESS' be arranged such that the two 'S's at the beginning of the word are not both present together as 'SS' at the start?",
+      "verification": "Calculate total permutations of 'SUCCESS' using the multiset permutation formula, then subtract the permutations where the first two characters are 'SS', and compare the result."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the total number of distinct ways to arrange the letters in the word 'BANANA' such that no two 'A's are adjacent to each other.",
+      "verification": "Calculate the permutations of 'B', 'N', 'N' and use the gap method (or inclusion-exclusion) to place the three 'A's in the 4 available spaces (before, between, and after the other letters), then compare against the manual combinatorial calculation result."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n modulo 100 equals 72.",
+      "verification": "Iterate through integers starting from 1 until 2^n % 100 == 72."
+    },
+    {
+      "category": "math_logic",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, and when n is written in base 10, the sum of its digits is 14, and it is a palindrome.",
+      "verification": "Python: Iterate through multiples of 7 starting from 7, check if str(n) == str(n)[::-1] and sum(int(d) for d in str(n)) == 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the word 'BANANA' such that no two 'A's are adjacent to each other?",
+      "verification": "Python: Use permutations from itertools to generate all unique arrangements and filter those where no 'A's are adjacent; verify the count."
+    },
+    {
+      "category": "string_manipulation",
+      "question": "Find the shortest possible string that contains all permutations of the set {'A', 'B', 'C'} as substrings. Provide the length of this string and the string itself.",
+      "verification": "Python: Check if all 6 permutations of 'ABC' exist as substrings within the provided string and verify if its length matches the known minimal superpermutation length of 9."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 1000 such that the sum of the digits of n is equal to the sum of the digits of its largest prime factor.",
+      "verification": "Iterate n starting from 1001, compute sum of digits of n, compute sum of digits of max_prime_factor(n), compare equality."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' such that no two 'I's are adjacent.",
+      "verification": "Calculate the total permutations using the multinomial coefficient and subtract those with adjacent 'I's using the inclusion-exclusion principle or a script to generate and count permutations meeting the constraint."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 1000 such that n is divisible by 7 and the sum of its digits is exactly 12.",
+      "verification": "Iterate from 1001 upwards, checking if n % 7 == 0 and sum(int(d) for d in str(n)) == 12."
+    },
+    {
+      "category": "sequence_analysis",
+      "question": "Consider the sequence defined by a(n) = (a(n-1) + 3) % 7, with a(0) = 2. What is the value of a(100)?",
+      "verification": "Python: Execute a loop or use modular arithmetic to calculate the 100th term of the sequence starting from a(0)=2."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the string 'MISSISSIPPI' contain the substring 'MISS' exactly once?",
+      "verification": "Python: Generate all unique permutations of 'MISSISSIPPI', filter for those containing 'MISS' exactly once, and count the total."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n is congruent to 1 modulo 7 and n is a multiple of 3.",
+      "verification": "Check n = 3, 6, 9... using pow(2, n, 7) == 1"
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Find a sequence of six distinct integers from the set {1, 2, 3, 4, 5, 6, 7, 8, 9} such that the sum of the first three integers equals 15, the sum of the last three integers equals 15, and the sum of all six integers equals 25.",
+      "verification": "Python: itertools.permutations to find a sequence of length 6 from range(1, 10), verify all elements are unique, and check sum(seq[:3]) == 15, sum(seq[3:]) == 15, and sum(seq) == 25."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer that is simultaneously a perfect square and a perfect cube, and is greater than 1000.",
+      "verification": "Check if a number n > 1000 satisfies sqrt(n)%1 == 0 and n**(1/3)%1 == 0, then find the minimum."
+    },
+    {
+      "category": "discrete_math",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' where no two 'I's are adjacent.",
+      "verification": "Calculate the total permutations using the multinomial coefficient and subtract those with adjacent 'I's using the inclusion-exclusion principle or a simple Python script to count valid permutations by generating all unique arrangements."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer that is simultaneously a perfect square and a perfect cube, and is also greater than 1000.",
+      "verification": "Python: Check if `n**(1/2)` and `n**(1/3)` are integers, iterate upwards from 1001, and verify the first match."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct ways to arrange the letters in the word 'BANANA' such that no two 'A's are adjacent.",
+      "verification": "Python: itertools.permutations to generate all unique arrangements, filter strings where no two 'A's are adjacent, and count."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, while n + 2 is divisible by 5.",
+      "verification": "Iterate through integers starting from 1 until the conditions are met, then check the result."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of its digits is 14, and n > 500.",
+      "verification": "Iterate through multiples of 7 starting from 504 and check if the sum of the digits equals 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that the two 'S's at the beginning and end of the word do not appear consecutively in any arrangement of the letters.",
+      "verification": "Calculate the total permutations of 'SUCCESS' (multiset permutation) and subtract the permutations where the substring 'SS' exists by treating 'SS' as a single block."
+    },
+    {
+      "category": "string_manipulation",
+      "question": "Write a function that accepts a string and returns a new string where every consonant is replaced by the next consonant in the alphabet (e.g., 'b' becomes 'c', 'd' becomes 'f'), while keeping vowels and casing unchanged. The alphabet sequence for consonants is b, c, d, f, g, h, j, k, l, m, n, p, q, r, s, t, v, w, x, y, z.",
+      "verification": "Define a mapping dictionary for consonants. Test the function against known strings like 'bcd' -> 'cdf' and check that vowels and non-alphabetic characters remain untouched."
+    },
+    {
+      "category": "algebraic_sequences",
+      "question": "Find the sum of the first 15 terms of an arithmetic progression where the first term is 7 and the common difference is 4.",
+      "verification": "Calculate sum using the formula S_n = n/2 * (2a + (n-1)d) and compare with the result of sum(range(7, 7 + 15*4, 4)) in Python."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the string 'MISSISSIPPI' contain the substring 'MISS' exactly once and do not contain the substring 'SSIP'?",
+      "verification": "Python: Use itertools.permutations or a counting algorithm (inclusion-exclusion/constrained string generation) to count permutations of the multiset {M:1, I:4, S:4, P:2} that satisfy the two substring conditions."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7, the sum of its digits is 14, and n is greater than 500.",
+      "verification": "Python: iterate from 501 upwards, check divisibility by 7 and sum of digits using string conversion or modulo arithmetic."
+    },
+    {
+      "category": "logic_puzzles",
+      "question": "Find the smallest positive integer $n$ such that $n$ is divisible by 12, the sum of its digits is 15, and $n$ contains no digit equal to 0.",
+      "verification": "Python: Iterate through multiples of 12 starting from 12, filter out numbers containing '0', check if sum of digits equals 15, and return the first match."
+    },
+    {
+      "category": "constrained_combinatorics",
+      "question": "Find the smallest positive integer n such that n! contains exactly 12 trailing zeros in its decimal representation.",
+      "verification": "Python: Iterate n starting from 50 (since 50! has 12 zeros) and check the number of factors of 5 using Legendre's Formula: sum(n // 5^i for i in range(1, 10))."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n! is divisible by 2024.",
+      "verification": "Python: Iterate through integers starting from 1, calculate factorial, check modulo 2024 == 0."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of its digits is 14, and n is a perfect square.",
+      "verification": "Iterate through squares (i^2) starting from 1, check if sum of digits equals 14 and if i^2 % 7 == 0."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that no two 'S' characters are adjacent.",
+      "verification": "Python: Generate all unique permutations of 'SUCCESS' using itertools and filter for those where no two 'S' indices are consecutive."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the word 'PROBABILITY' such that the two 'B's are not adjacent?",
+      "verification": "Calculate the total number of permutations using the multinomial coefficient and subtract the number of permutations where the two 'B's are treated as a single block."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the string 'BANANA' such that no two 'A's are adjacent?",
+      "verification": "Generate all unique permutations of the string 'BANANA' and count those where the indices of 'A' characters satisfy the condition abs(i - j) > 1 for all pairs."
+    },
+    {
+      "category": "combinatorics_logic",
+      "question": "Consider a 4x4 grid. How many distinct paths are there from the top-left cell (0,0) to the bottom-right cell (3,3) if you can only move either right or down, and you must pass through the center cell (1,1)?",
+      "verification": "Python: Calculate total paths using combinations (nCr). Path 1: (0,0) to (1,1) is (1+1)!/(1!1!) = 2. Path 2: (1,1) to (3,3) is (2+2)!/(2!2!) = 6. Multiply 2 * 6 to get 12."
+    },
+    {
+      "category": "numeric_theory",
+      "question": "Find the smallest positive integer that is a multiple of 13 and whose digits consist only of 0s and 1s.",
+      "verification": "Python: Iterate through integers represented as binary strings (converted to decimals), check divisibility by 13, and return the smallest match (1001)."
+    },
+    {
+      "category": "math_number_theory",
+      "question": "Find the smallest positive integer that is divisible by every integer from 1 to 10 inclusive.",
+      "verification": "Python: Check if the number is divisible by each integer in range(1, 11) and verify it is the least common multiple using math.lcm(*range(1, 11))."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 13 and the sum of the digits of n is 13.",
+      "verification": "Python: Iterate starting from 13, checking divisibility by 13 and sum of digits until the first match is found."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n is congruent to 1 modulo 31.",
+      "verification": "Iterate through positive integers n starting from 1 and check if pow(2, n, 31) == 1."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of the squares of its digits is a perfect square and the product of its digits is a multiple of 10.",
+      "verification": "Iterate through integers starting from 101, compute digit squares sum and digit product, check if square root is integer and product % 10 == 0."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the string 'MISSISSIPPI' contain the substring 'SS' exactly once?",
+      "verification": "Calculate the total permutations of 'MISSISSIPPI', identify the valid permutations by treating 'SS' as a single block and ensuring no other 'SS' occurs, then compare with the model's output."
+    },
+    {
+      "category": "math_constraint_search",
+      "question": "Find a three-digit integer n such that n is equal to the sum of the cubes of its digits, and the product of its digits is exactly 48.",
+      "verification": "Python: Iterate from 100 to 999, check if sum(int(d)**3 for d in str(n)) == n and int(str(n)[0])*int(str(n)[1])*int(str(n)[2]) == 48."
+    },
+    {
+      "category": "sequence_analysis",
+      "question": "Consider a sequence where each term is the sum of the digits of the previous term multiplied by 7. If the first term is 12, what is the 100th term in the sequence?",
+      "verification": "Python: Iterate the transformation function 99 times and compare the result."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n ≡ 1 (mod 31) and n > 1.",
+      "verification": "Iterate through integers n starting from 2 and check if pow(2, n, 31) == 1."
+    },
+    {
+      "category": "constrained_combinatorics",
+      "question": "Find a four-digit integer where the first digit is the sum of the last two digits, the second digit is the difference between the first and last digits, and the number itself is a perfect square.",
+      "verification": "Python: Iterate through integers from 1000 to 9999, check if str(n) satisfies the digit relations d0 == d2 + d3 and d1 == abs(d0 - d3), then verify if math.isqrt(n)**2 == n."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n mod 11 = 3 and n mod 13 = 5.",
+      "verification": "Verify the result satisfies all three conditions using modulo arithmetic."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' such that the four 'I's are not all consecutive.",
+      "verification": "Python: Calculate total permutations (11! / (4! * 4! * 2!)) and subtract the count of permutations where 'IIII' is treated as a single block (8! / (4! * 2!))."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits is 14.",
+      "verification": "Iterate through multiples of 7 starting from 7, check if the sum of digits of the number equals 14, and return the first match."
+    },
+    {
+      "category": "string_arithmetic",
+      "question": "Find a 5-letter English word such that if you replace each letter with its 1-indexed position in the alphabet (A=1, B=2, ..., Z=26), the sum of these numbers is exactly 60, and the word contains no repeating letters.",
+      "verification": "Python: Check word length is 5, ensure all characters in the word are unique, calculate the sum of `ord(char.lower()) - 96` for each character, and verify the word exists in a standard English dictionary."
+    },
+    {
+      "category": "algebra",
+      "question": "Find the product of all real solutions to the equation x^4 - 5x^2 + 4 = 0.",
+      "verification": "Use Python's sympy or numpy to solve the polynomial equation and calculate the product of the roots."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of its digits is 14, and n contains no digit equal to 0.",
+      "verification": "Verify n % 7 == 0, '0' not in str(n), and sum(int(d) for d in str(n)) == 14; confirm it is the minimum through an iterative search."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'ABRACADABRA' that start and end with the letter 'A'.",
+      "verification": "Python: Calculate the total count of each letter in 'ABRACADABRA', fix one 'A' at the start and one 'A' at the end, then compute the multinomial coefficient for the remaining 9 letters (4 'A's, 2 'B's, 2 'R's, 1 'C', 1 'D') using factorial division."
+    },
+    {
+      "category": "math_number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of its divisors is a perfect square.",
+      "verification": "Iterate through integers starting from 101, compute the sum of divisors using a helper function, and check if the result is a perfect square."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct anagrams of the word 'SUCCESS' are there?",
+      "verification": "Calculate the factorial of the total number of characters (7!) and divide by the product of the factorials of the counts of each repeating letter (S: 3, C: 2) using Python's math.factorial."
+    },
+    {
+      "category": "discrete_math",
+      "question": "Consider a sequence where each term a_n is defined by a_n = (n^2 mod 7) + 1. Calculate the sum of the first 20 terms of this sequence.",
+      "verification": "Python: List comprehension or loop to calculate (i**2 % 7) + 1 for i in range(1, 21) and sum the result."
+    },
+    {
+      "category": "string_transformation",
+      "question": "Find a single English word that contains exactly seven unique letters, all of which are vowels (a, e, i, o, u), and when those unique letters are sorted alphabetically, they form the sequence 'aeiou'. Provide a word that is at least 9 letters long and satisfies this condition.",
+      "verification": "Python: Check word length >= 9, verify that set(word.lower()) consists only of vowels, and check that sorted(list(set(word.lower()))) == ['a', 'e', 'i', 'o', 'u']."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique strings of length 6 can be formed using only the letters 'A', 'B', and 'C' such that no two adjacent characters are the same?",
+      "verification": "Generate all possible strings of length 6 from the alphabet {A, B, C}, filter those without adjacent identical characters, and count the total."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 1000 such that n is divisible by 7 and the sum of its digits is exactly 10.",
+      "verification": "Iterate integers starting from 1001, check if n % 7 == 0 and sum(int(d) for d in str(n)) == 10."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits is 21, while also satisfying the condition that n is a multiple of 11.",
+      "verification": "Python: Iterate through multiples of 77 starting from 77, calculate the sum of digits of the number, and return the first one where the sum equals 21."
+    },
+    {
+      "category": "combinatorial_string_constraints",
+      "question": "Find a 5-letter English word that contains no repeating letters, where the sum of the letters' alphabetical positions (A=1, B=2, ..., Z=26) is exactly 40, and the word contains at least two vowels.",
+      "verification": "Python: Check word length is 5, check all characters are unique, check len(set(word) & set('aeiou')) >= 2, and verify sum(ord(c.lower()) - 96 for c in word) == 40 using a standard word list."
+    },
+    {
+      "category": "code_outcome_prediction",
+      "question": "Determine the final value of the list 'vals' after executing the following code: vals = [1, 2, 3]; [vals.append(x) for x in range(2)]; vals = [x for x in vals if x % 2 == 0]",
+      "verification": "Python: Execute the code exactly as written and compare the resulting list to [2, 0, 2]."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a 4x4 grid. A path starts at the top-left cell (0,0) and ends at the bottom-right cell (3,3). The path can only move right or down. How many unique paths exist that do not pass through the cell (1,1)?",
+      "verification": "Python: Calculate total paths using binomial coefficient C(6, 3) and subtract paths passing through (1,1) by calculating paths from (0,0) to (1,1) multiplied by paths from (1,1) to (3,3)."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 17, and the sum of the digits of n is exactly 17.",
+      "verification": "Python: Iterate through multiples of 17 (17, 34, ...) and check if sum(int(digit) for digit in str(n)) == 17."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is divisible by 9 and n + 2 is divisible by 11.",
+      "verification": "Use a Python loop to check n % 7 == 0, (n+1) % 9 == 0, and (n+2) % 11 == 0 starting from 1."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, where 100 < n < 500.",
+      "verification": "Iterate through integers in the range (100, 500), check if n % 7 == 0, and verify if math.isqrt(n + 1)**2 == n + 1."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 17, and when n is divided by 3, 5, and 7, the remainders are 2, 3, and 4 respectively.",
+      "verification": "Python: Iterate through multiples of 17 (17*k) and check if n % 3 == 2, n % 5 == 3, and n % 7 == 4 using a loop or CRT calculation."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, and n + 2 is a perfect cube.",
+      "verification": "Python: Iterate through integers n starting from 1, checking if n % 7 == 0, if sqrt(n+1) is an integer, and if cbrt(n+2) is an integer."
+    },
+    {
+      "category": "combinatorial_math",
+      "question": "Find the number of distinct permutations of the letters in the word 'BANANA' such that no two 'A's are adjacent.",
+      "verification": "Python: Calculate total permutations (6! / (3!*1!*2!)) and filter valid permutations using a lambda check `not 'AA' in p` or use stars and bars logic to verify the count is 10."
+    },
+    {
+      "category": "sequence_analysis",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, and when n is written in base 10, the sum of its digits is 14, and the product of its digits is 48.",
+      "verification": "Iterate through multiples of 7, check if sum of digits equals 14 and product of digits equals 48."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct ways to arrange the letters of the word 'SUCCESS' such that no two 'S' characters are adjacent.",
+      "verification": "Python: Use itertools.permutations or a counting algorithm to generate all unique arrangements and filter those where no two 'S' characters appear consecutively."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'BANANA' such that no two 'A's are adjacent.",
+      "verification": "Python: Use itertools.permutations to generate all unique arrangements, filter those containing 'AA', and count the remainder."
+    },
+    {
+      "category": "symbolic_manipulation",
+      "question": "What is the coefficient of the x^3 term in the polynomial expansion of (2x^2 - 3x + 1)^4?",
+      "verification": "Use SymPy to expand the expression (2*x**2 - 3*x + 1)**4 and verify the coefficient of the x**3 term."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the word 'SUCCESS' exist such that no two 'S' characters are adjacent to each other?",
+      "verification": "Calculate permutations by arranging non-S letters (U, C, C, E) and using stars and bars to place S in gaps, then compare with Python's itertools.permutations filtered for the condition."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n! ends in exactly 124 zeros.",
+      "verification": "Python: Calculate the number of trailing zeros of n! using Legendre's Formula (sum of floor(n/5^k)) and binary search for the value of n."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer that is a multiple of 7, 11, and 13, and leaves a remainder of 3 when divided by 9.",
+      "verification": "Verify the result satisfies all four modulo conditions using Python's % operator."
+    },
+    {
+      "category": "math_puzzle",
+      "question": "Find a four-digit integer that is a perfect square and remains a perfect square when its digits are reversed. The number must be greater than 1000 and the reversed number must be distinct from the original.",
+      "verification": "Python: Iterate through integers from 32 to 99, compute their squares, check if the square of the reversed root is the reverse of the original square, and ensure the original square is not equal to its reverse."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a 3x3 grid where each cell is colored either black or white. Calculate the number of distinct grid configurations that remain identical when rotated 180 degrees.",
+      "verification": "Python: Iterate through all 2^9 (512) possible grids. For each grid, check if the value at (i, j) is equal to the value at (2-i, 2-j) for all cells; count the matches."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that the two 'S's are not adjacent, the two 'C's are not adjacent, and the two 'S's are not adjacent to the two 'C's.",
+      "verification": "Python: Generate all permutations of 'SUCCESS', filter for unique strings, and count those that satisfy the adjacency constraints using regex or string index checks."
+    },
+    {
+      "category": "constrained_combinatorics",
+      "question": "Find the smallest positive integer that is divisible by every integer from 1 to 10 inclusive, but is not a multiple of 11, 13, or 17.",
+      "verification": "Calculate the least common multiple of numbers 1-10 (2520) and verify that 2520 % 11 != 0, 2520 % 13 != 0, and 2520 % 17 != 0 using Python's math.gcd or manual verification."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7 and the sum of the digits of n is 14.",
+      "verification": "Iterate through multiples of 7 starting from 7, calculate the sum of digits for each, and return the first n where the sum equals 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' such that no two 'I's are adjacent to each other.",
+      "verification": "Calculate the total permutations using the multinomial coefficient formula after placing the other characters and using the stars and bars method for the I's."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that the two 'S's at the beginning and end of the word are not both present (i.e., permutations that do not start and end with 'S').",
+      "verification": "Calculate total permutations of 'SUCCESS' (7! / (3!*2!)) and subtract the number of permutations where both the first and last characters are fixed as 'S' (permutations of the remaining 'UCCES')."
+    },
+    {
+      "category": "algebra",
+      "question": "Find the product of all real values of x that satisfy the equation |x^2 - 5x + 4| = 2.",
+      "verification": "Python: Solve the two cases x^2 - 5x + 4 = 2 and x^2 - 5x + 4 = -2 using the quadratic formula, collect the unique real roots, and multiply them."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 17, and the sum of the digits of n is equal to 17.",
+      "verification": "Iterate through multiples of 17 starting from 17, calculate the sum of the digits for each, and return the first n where the sum equals 17."
+    },
+    {
+      "category": "discrete_math",
+      "question": "Find the number of distinct permutations of the word 'SUCCESS' such that the two 'S's at the beginning of the word are not adjacent to each other.",
+      "verification": "Python: Calculate the total permutations using factorial division (7! / (3! * 2!)) and subtract the invalid cases where the two S's are consecutive using the stars-and-bars or string-position method."
+    },
+    {
+      "category": "combinatorics_logic",
+      "question": "Find the number of distinct permutations of the string 'BOOKKEEPER' that do not contain the substring 'OO'.",
+      "verification": "Python: Generate all permutations of the multiset {'B':1, 'O':2, 'K':2, 'E':3, 'P':1, 'R':1}, filter those where 'OO' is not present, and count the total."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters of the word 'SUCCESS' such that the two 'S's at the beginning of the word are not adjacent?",
+      "verification": "Calculate the total permutations of the multiset {S, S, S, U, C, C, E}, subtract the cases where the specific 'SS' block exists, or use Python's itertools.permutations to count valid arrangements."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Find a four-digit integer where the digits are strictly increasing, the sum of the digits is 18, and the product of the digits is 120. Provide the integer.",
+      "verification": "Python: Iterate through all permutations of 4 distinct digits from 1-9; check if sorted(digits) == digits, sum(digits) == 18, and math.prod(digits) == 120."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is divisible by 9 and n + 2 is divisible by 10.",
+      "verification": "Iterate through integers starting from 1 until all three modulo conditions are met."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the word 'MISSISSIPPI' such that the four 'I's are not all adjacent to each other.",
+      "verification": "Calculate total permutations (11!/(4!*4!*2!)) and subtract the cases where all four 'I's are together (treating 'IIII' as one block, permutations of {M, S, S, S, S, P, P, IIII}). Compare result."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the total number of distinct rearrangements of the letters in the word 'BANANA' such that no two 'A's are adjacent.",
+      "verification": "Calculate permutations using itertools.permutations, filter for unique strings, and verify the count satisfies the adjacency constraint."
+    },
+    {
+      "category": "sequence_logic",
+      "question": "The sequence 2, 6, 12, 20, 30, ... follows a specific pattern based on the index n starting at 1. Find the 15th term of this sequence.",
+      "verification": "Python: Check if term at index n is n*(n+1). Compute 15*16 to verify the result is 240."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the smallest positive integer n such that the number of ways to choose 2 items from n items is greater than 1000.",
+      "verification": "Python: iterate n from 1 until n*(n-1)/2 > 1000 and return n."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n modulo 100 equals 12.",
+      "verification": "Iterate through integers n starting from 1 until 2**n % 100 == 12 is satisfied."
+    },
+    {
+      "category": "constrained_combinatorics",
+      "question": "Find a four-digit number (1000-9999) such that the number is divisible by 11, the sum of its digits is 20, and the product of its digits is 192. Provide the smallest such number.",
+      "verification": "Python: Iterate from 1000 to 9999, check if divisible by 11, check sum of digits equals 20, check product of digits equals 192, and return the first match."
+    },
+    {
+      "category": "number_theory",
+      "question": "Let f(n) be the sum of the proper divisors of n. Find the smallest integer n greater than 50 such that f(n) = n - 1.",
+      "verification": "Python: Iterate through integers starting from 51, compute the sum of divisors excluding the number itself, and check if the sum equals n-1."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Identify a 5-letter English word such that if you replace each letter with its corresponding prime number (A=2, B=3, C=5, D=7, E=11, F=13, G=17, H=19, I=23, J=29, K=31, L=37, M=41, N=43, O=47, P=53, Q=59, R=61, S=67, T=71, U=73, V=79, W=83, X=89, Y=97, Z=101), the product of the five numbers is exactly 5,910,247.",
+      "verification": "Python: Create a dictionary mapping letters to their prime index, iterate through a standard English word list, calculate the product of the values for each 5-letter word, and check for equality to 5,910,247."
+    },
+    {
+      "category": "combinatorics_logic",
+      "question": "Consider a 4x4 grid. A path starts at (0,0) and moves only right or down to reach (3,3). A path is 'valid' if it never touches the cells (1,1) or (2,2). How many distinct valid paths exist?",
+      "verification": "Python: Use a recursive function with memoization or dynamic programming to count paths from (0,0) to (3,3), treating (1,1) and (2,2) as obstacles (return 0 if the path hits them)."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct strings can be formed by permuting the letters in the word 'BANANA' such that no two 'A's are adjacent?",
+      "verification": "Calculate the total permutations using the multinomial coefficient and subtract those with adjacent 'A's using the inclusion-exclusion principle or simple combinatorial counting, then verify by generating all unique permutations in Python and checking the condition."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of ways to arrange the letters in the word 'BANANA' such that no two 'A's are adjacent.",
+      "verification": "Generate all unique permutations of 'BANANA' using itertools and count those where no two 'A's are adjacent."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the string 'banana' contain no two identical vowels adjacent to each other?",
+      "verification": "Generate all unique permutations of 'banana' using itertools.permutations and a set, then filter by checking if any 'aa' substring exists."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct strings of length 6 can be formed using only the letters 'A', 'B', and 'C' such that the string does not contain the substring 'AB'?",
+      "verification": "Python: Iterate through all 3^6 strings, filter out those containing 'AB', and count the remainder."
+    },
+    {
+      "category": "discrete_math",
+      "question": "Let S be the set of all integers from 1 to 100 inclusive. How many elements in S are divisible by 3 or 5, but not by 15?",
+      "verification": "Python: sum(1 for i in range(1, 101) if (i % 3 == 0 or i % 5 == 0) and (i % 15 != 0))"
+    },
+    {
+      "category": "math_sequence",
+      "question": "Consider a sequence where the first term is 3, the second term is 7, and each subsequent term is the sum of the two preceding terms multiplied by 0.5, rounded down to the nearest integer. What is the 10th term of this sequence?",
+      "verification": "Implement a loop or recursive function to compute the 10th term using floor division by 2 for the sum of the two previous elements."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Calculate the number of distinct permutations of the string 'MISSISSIPPI' that start and end with the letter 'I'.",
+      "verification": "Python: Calculate permutations using the formula (n-k)! / product of factorials of remaining counts, where n=11 and k=2 fixed 'I's."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits in base 10 is equal to 21.",
+      "verification": "Iterate through multiples of 7 starting from 7, calculate the sum of digits for each, and return the first integer where the sum equals 21."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the total number of distinct ways to arrange the letters of the word 'SUCCESS' such that the two 'C's are not adjacent to each other.",
+      "verification": "Calculate permutations as (total arrangements) - (arrangements where 'CC' is treated as a single block) and verify against the result of a script generating permutations using itertools."
+    },
+    {
+      "category": "arithmetic_puzzles",
+      "question": "Find a three-digit integer such that the number is exactly 14 times the sum of its digits.",
+      "verification": "Python: Iterate through range(100, 1000) and check if n == 14 * sum(int(d) for d in str(n))."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' that start with the letter 'M' and end with the letter 'I'.",
+      "verification": "Calculate permutations using the formula for permutations of a multiset: (n-k)! / product of factorials of remaining character counts."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the letters in the word 'BANANA' contain no two consecutive 'A's?",
+      "verification": "Calculate permutations using itertools.permutations, filter for uniqueness, and count occurrences where no two 'A's are adjacent."
+    },
+    {
+      "category": "math_number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, and n > 100.",
+      "verification": "Verify by iterating integers starting from 101, checking if n % 7 == 0 and sqrt(n + 1).is_integer()"
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of its digits is 14, and n is less than 200.",
+      "verification": "Python: Iterate from 7 to 199 with step 7, check if the sum of digits equals 14."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits in base 10 is equal to 14.",
+      "verification": "Iterate through multiples of 7 starting from 7 and check if the sum of digits of the multiple equals 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Calculate the number of distinct permutations of the word 'BOOKKEEPER' such that the three 'E's appear consecutively.",
+      "verification": "Use Python's itertools.permutations or the multinomial coefficient formula: treat 'EEE' as a single block, calculate permutations of the multiset {B, O, O, K, K, P, EEE, R}."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct strings of length 6 can be formed using only the letters 'A', 'B', and 'C' such that the string contains exactly two 'A's, two 'B's, and two 'C's, and no two identical letters are adjacent?",
+      "verification": "Generate all permutations of 'AABCBC' (or equivalent combinations), filter for uniqueness, then filter for those where no two identical characters are adjacent, and count the results."
+    },
+    {
+      "category": "combinatorial_search",
+      "question": "Find the smallest positive integer n such that n is a multiple of 17, and the sum of the digits of n is exactly 17, and the product of the digits of n is exactly 0.",
+      "verification": "Python: Iterate through multiples of 17, check if the string representation contains '0', and if the sum of its digits equals 17."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that 2^n is congruent to 1 modulo 105.",
+      "verification": "Python: Iterate starting from n=1, computing pow(2, n, 105) until the result equals 1."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of its digits is equal to the product of its digits, and the number is a multiple of 5.",
+      "verification": "Python: Iterate from 101 upwards, check divisibility by 5, then compare sum(digits) to product(digits)."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7, the sum of the digits of n is 13, and n is a perfect square.",
+      "verification": "Iterate through squares (i^2), check if i^2 % 7 == 0 and sum(int(d) for d in str(i^2)) == 13."
+    },
+    {
+      "category": "combinatorics",
+      "question": "Find the number of distinct permutations of the string 'MISSISSIPPI' that do not contain the substring 'PP'.",
+      "verification": "Generate all permutations of 'MISSISSIPPI' using itertools.permutations and count those that do not contain the substring 'PP'."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits is 21.",
+      "verification": "Iterate through multiples of 7 starting from 7, calculate the sum of digits for each, and return the first match."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a 4-digit number where the first digit is the number of zeros in the number, the second is the number of ones, the third is the number of twos, and the fourth is the number of threes. Find the unique number that satisfies this condition.",
+      "verification": "Python: Iterate through all integers from 1000 to 9999, convert to a string/list of digits, count occurrences of 0, 1, 2, and 3, and check if they match the digits at indices 0, 1, 2, and 3 respectively."
+    },
+    {
+      "category": "number_theory",
+      "question": "Identify the smallest positive integer n greater than 500 such that the sum of the digits of n is equal to the sum of the prime factors of n (counting multiplicity).",
+      "verification": "Iterate from 501 upwards, calculate digit sum and prime factor sum using a helper function, check for equality."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a string consisting of exactly 6 characters using only the letters 'A', 'B', and 'C'. How many such strings contain at least one 'A', at least one 'B', and at least one 'C' simultaneously?",
+      "verification": "Python: Iterate through all 3^6 possible strings using itertools.product('ABC', repeat=6) and count those where the set of characters has length 3."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits is 35.",
+      "verification": "Iterate through multiples of 7 starting from 7, calculate the sum of digits for each, and return the first integer where the sum equals 35."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that the sum of the squares of its digits is a prime number, and n is divisible by the sum of its digits.",
+      "verification": "Python: Iterate n from 101 upwards. Check if sum_of_squares(n) is prime using a primality test, check if n % sum_of_digits(n) == 0, and return the first match."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, and n + 2 is divisible by 9.",
+      "verification": "Iterate through integers starting from 1, check the divisibility by 7, check if n+1 is a perfect square using math.isqrt, and check divisibility by 9."
+    },
+    {
+      "category": "symbolic_algebra",
+      "question": "Simplify the expression (2a^3 * b^-2)^3 / (4a^2 * b^4)^-1 and express the result in the form k * a^x * b^y, where k, x, and y are integers. What are the values of k, x, and y?",
+      "verification": "Use SymPy to define the variables a and b, simplify the expression algebraically, and compare the exponents and coefficient to the provided values."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 500 such that n is divisible by 7 and the sum of its digits is exactly 15.",
+      "verification": "Iterate through integers starting from 501, check if n % 7 == 0 and sum(int(digit) for digit in str(n)) == 15."
+    },
+    {
+      "category": "discrete_math",
+      "question": "Find the number of distinct permutations of the word 'COMBINATORICS' that start and end with a vowel.",
+      "verification": "Python: Calculate total permutations using multinomial coefficient (factorial of length divided by product of factorial of character counts), then filter for strings starting and ending with {'O', 'A', 'I'} and sum the counts."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 7 and the sum of the digits of n is 14, and n is also a perfect square.",
+      "verification": "Iterate through squares i*i starting from 1, check if i*i % 7 == 0 and sum(int(d) for d in str(i*i)) == 14."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "A passcode consists of 4 unique digits chosen from 0 to 9. The passcode must be strictly increasing. How many such passcodes are possible?",
+      "verification": "Python: itertools.combinations(range(10), 4) and return the length of the result list."
+    },
+    {
+      "category": "combinatorial_logic",
+      "question": "Consider a 4x4 grid. Place four queens such that no two queens attack each other and the sum of the row indices (0-indexed) plus the sum of the column indices equals 24. Provide the set of coordinates (row, col) for the four queens.",
+      "verification": "Python: Check if the set of 4 coordinates satisfies the n-queens constraint (no shared row, col, or diagonal) and that the sum of all row indices and column indices is exactly 24."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters in the word 'BANANA'?",
+      "verification": "Use math.factorial to compute permutations while accounting for character repetitions (dividing by the factorials of counts of each character)."
+    },
+    {
+      "category": "string_constraints",
+      "question": "Find a 7-letter English word that contains all five vowels (a, e, i, o, u) at least once, where the first and last letters are the same, and the word does not contain the letter 's'.",
+      "verification": "Python: Check word length is 7, all vowels are present via set intersection, word[0] == word[-1], and 's' not in word. Verify word exists in a standard English dictionary."
+    },
+    {
+      "category": "string_processing",
+      "question": "Find the longest palindromic substring within the string 'abacabaefgfedcba' and provide its length.",
+      "verification": "Calculate the length using a standard O(n^2) or Manacher's algorithm implementation and verify the result against the provided answer."
+    },
+    {
+      "category": "combinatorial_constrained_search",
+      "question": "Find the smallest positive integer n such that n is divisible by 9, the sum of its digits is 18, and it contains no digit equal to 0.",
+      "verification": "Python: Iterate integers starting from 1, check `n % 9 == 0`, `sum(int(d) for d in str(n)) == 18`, and `'0' not in str(n)`."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square, while n + 2 is a multiple of 5.",
+      "verification": "Python: Iterate through integers starting from 1 until the conditions (n % 7 == 0), (math.isqrt(n+1)**2 == n+1), and ((n+2) % 5 == 0) are met."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique 4-digit integers can be formed using the digits {1, 2, 3, 4, 5} such that the digits are strictly increasing and the sum of the digits is exactly 14? List all such integers.",
+      "verification": "Use itertools.combinations(range(1, 6), 4) to generate all strictly increasing sets, sum them, and check if the sum equals 14."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many unique permutations of the string 'MISSISSIPPI' contain no two consecutive 'S' characters?",
+      "verification": "Generate all permutations of the string using itertools.permutations and count those that do not contain the substring 'SS'."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is a multiple of 11, and the sum of the digits of n is 13, and the product of the digits of n is 36.",
+      "verification": "Python: Check if n % 11 == 0, sum(int(d) for d in str(n)) == 13, and math.prod(int(d) for d in str(n)) == 36."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 1000 such that n is a multiple of 13 and the sum of its digits is equal to 17.",
+      "verification": "Python: Iterate from 1001 upwards, check `n % 13 == 0` and `sum(int(d) for d in str(n)) == 17`."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its digits in base 10 is 7.",
+      "verification": "Iterate through multiples of 7 starting from 7, calculate the sum of digits for each, and return the first one where the sum equals 7."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is a perfect square.",
+      "verification": "Iterate through multiples of 7 and check if the square root of n+1 is an integer."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and n + 1 is divisible by 8 and n + 2 is divisible by 9.",
+      "verification": "Check n % 7 == 0, (n + 1) % 8 == 0, and (n + 2) % 9 == 0 using a loop or the Chinese Remainder Theorem."
+    },
+    {
+      "category": "string_transformation",
+      "question": "Consider the string 'ALGORITHM'. Apply a two-step transformation: first, replace every vowel (A, E, I, O, U) with the next consonant in the English alphabet (B, F, J, P, V respectively); second, shift every remaining consonant to the position that is its mirror image in the alphabet (A <-> Z, B <-> Y, C <-> X, etc.). What is the final string?",
+      "verification": "Define a mapping for vowel-to-consonant shifts and a function for the Atbash cipher (alphabet reversal). Apply these to the input string and assert equality with the target result 'ZOYTSKRNM'."
+    },
+    {
+      "category": "number_theory",
+      "question": "Find the smallest positive integer n greater than 100 such that n is a perfect square and the sum of its digits is a perfect square.",
+      "verification": "Python: Iterate n from 101 upwards, check if sqrt(n) is integer and sum(int(d) for d in str(n)) is a perfect square."
+    },
+    {
+      "category": "combinatorics",
+      "question": "How many distinct ways can you arrange the letters of the word 'SUCCESS' such that no two 'S' characters are adjacent?",
+      "verification": "Python: Calculate permutations of 'SUCCESS' (S:3, U:1, C:2, E:1) and filter for permutations where 'SS' is not a substring using a loop or regex."
+    }
+  ]
+}

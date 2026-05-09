@@ -1,0 +1,54 @@
+{
+  "accuracy": 0.5,
+  "binary_accuracy": 1.0,
+  "by_majority_bucket": {
+    "3/3": {
+      "accuracy": 0.5,
+      "n": 2
+    }
+  },
+  "by_majority_bucket_binary": {
+    "3/3": {
+      "accuracy": 1.0,
+      "n": 2
+    }
+  },
+  "comparisons": [
+    {
+      "agrees": true,
+      "binary_agrees": true,
+      "candidate_answer": "1012",
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "INCORRECT",
+      "oracle_raw_text": "VERDICT: INCORRECT\nCONFIDENCE: 1.0\nREASONING: The sum of the first $n$ integers is $S_n = n(n+1)/2$. For $S_n$ to be divisible by 2024 and 2025, $n(n+1)$ must be divisible by $2 \\times 2024 \\times 2025 = 8220000$. The smallest such $n$ is $2024 \\times 2025 = 4098600$. The value $n \\pmod{2024}$ for this $n$ is $0$, not $1012$. The candidate answer $1012$ corresponds to $n=2024$, where the sum is $2024 \\times 2025 / 2 = 2049300$, which is divisible by 2024 but not by 2025 (since $2049300 / 2025 = 1012$, wait, $2025 \\times 1012 = 2049300$. Let me re-calculate. $2025 \\times 1012 = 2049300$. Yes, it is divisible. But is it the *smallest*? $n(n+1)/2 = k \\cdot 2024 \\cdot 2025$. $n(n+1) = 2k \\cdot 2024 \\cdot 2025$. Since $\\gcd(2024, 2025)=1$, $n$ or $n+1$ must cover factors. $2024 = 8 \\times 11 \\times 23$. $2025 = 3^4 \\times 5^2$. We need $n(n+1)$ divisible by $2 \\times 2024 \\times 2025 = 16 \\times 11 \\times 23 \\times 3^4 \\times 5^2$. If $n=2024$, $n+1=2025$. Product $2024 \\times 2025$. Divisible by $2024$ and $2025$. Sum is $2024 \\times 2025 / 2 = 1012 \\times 2025$. This is divisible by 2025. Is it divisible by 2024? $1012 \\times 2025 / 2024 = 1012 \\times 2025 / (8 \\times 11 \\times 23)$. $1012 = 4 \\times 11 \\times 23$. So $1012/2024 = 1/2$. Sum = $1/2 \\times 2025 \\times 2024$. Wait, $S_{2024} = 2024 \\times 2025 / 2 = 1012 \\times 2025$. Is $1012 \\times 2025$ divisible by 2024? $1012 \\times 2025 = (2024/2) \\times 2025 = 2024 \\times (2025/2)$. Since 2025 is odd, this is not an integer multiple of 2024. $1012 \\times 2025 / 2024 = 2025/2 = 1012.5$. Not divisible. So $n=2024$ fails. The smallest $n$ is indeed much larger, making $n \\equiv 0 \\pmod{2024}$. The candidate 1012 is incorrect.",
+      "question_index": 0,
+      "solution_index": 0
+    },
+    {
+      "agrees": false,
+      "binary_agrees": true,
+      "candidate_answer": null,
+      "local_label": "INCORRECT",
+      "local_votes": [
+        "INCORRECT",
+        "INCORRECT",
+        "INCORRECT"
+      ],
+      "majority_bucket": "3/3",
+      "oracle_confidence": 1.0,
+      "oracle_label": "INVALID",
+      "oracle_raw_text": "VERDICT: INVALID\nCONFIDENCE: 1.0\nREASONING: The candidate answer is \"NONE\", which is not an integer and fails to answer the question asking for a specific value of $n \\pmod{2024}$. The problem requires calculating the least common multiple of 2024 and 2025, dividing by 2, and taking the result modulo 2024, but no numerical answer was provided.",
+      "question_index": 0,
+      "solution_index": 1
+    }
+  ],
+  "jsonl": "outputs/pairwise_rollouts_debug/samples_qwen35_9b_together_single_verify_baby.jsonl",
+  "n": 2
+}

@@ -1,31 +1,20 @@
-You are a math question generator.
 
-Generate one original math problem with a single integer answer.
+
+
 
 Target difficulty:
-- Make it challenging but still solvable with careful work (not extreme olympiad-style).
-- Aim for "barely solvable" by a strong model: difficult to solve, but not impossible.
-- Prioritize problems that are hard to reason through but easy to verify once an answer is given.
-
-Verifiability requirement: given the answer, checking it must be fast and direct. Examples of checkable answers:
-- Equations: plug the answer back in and verify both sides match
-- Counting problems: list or enumerate the items directly
-- "Find the value of X such that [condition]": verify by testing the condition on X
-- Modular arithmetic: verify by direct computation of the mod
-- Geometry with explicit coordinates or lengths: verify by formula substitution
-
-Difficulty guidance:
-- Avoid trivial arithmetic or one-step algebra.
-- Prefer medium-hard discrete math, number theory, modular arithmetic, combinatorics, or algebraic constraints.
-- The answer should require real effort to find, while verification remains quick and direct.
-
-Avoid:
-- Multi-step inventory or flow problems (selling fractions of fractions, etc.) where checking the answer requires redoing all the steps
-- Any problem where verification requires the same insight as solving
-- Problems with infinite answer sets
-- Problems where you are not certain the answer is a unique finite integer
+- Make it difficult question that would you could solve about have the time
+- The question must also be verifiable with some python code or easy to check with the correct answer
 
 Do NOT provide the solution, answer, hints, or intermediate steps.
 
 Output exactly one line:
 QUESTION: <question text>
+
+here are 3 examples create a 4th
+
+{question_bank_examples}
+
+
+
+

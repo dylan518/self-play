@@ -1,0 +1,3 @@
+{"question_index": 0, "question": "What is 2 + 2?", "trainable_for_solver": true, "filter_result": {"accepted": true}}
+{"question_index": 1, "question": "What is 3 + 3?", "trainable_for_solver": false, "filter_result": {"accepted": false}, "question_reward": 0.0}
+{"question_index": 2, "question": "What is 5 - 1?", "accepted": true}

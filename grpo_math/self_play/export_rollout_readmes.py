@@ -5,6 +5,8 @@ from typing import Any
 
 import yaml
 
+from grpo_math.self_play.question_bank import render_question_bank_block_from_config
+
 
 def _read_rows(jsonl_path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
@@ -48,8 +50,27 @@ def _build_prompt_context(config_path: Path | None) -> dict[str, str]:
     generator_template = ""
     if gen_cfg.get("prompt_template_path"):
         generator_template = _load_text_maybe(str(gen_cfg["prompt_template_path"]), config_dir)
+        if generator_template:
+            seed = int(cfg.get("seed", 1234))
+            question_bank_examples = render_question_bank_block_from_config(gen_cfg, seed=seed)
+            generator_template = generator_template.format(
+                question_bank_examples=question_bank_examples
+            )
+            if gen_cfg.get("question_bank", {}).get("enabled", False):
+                generator_template = (
+                    "NOTE: question bank examples rotate per generated question using seed + question index. "
+                    "This is the representative prompt for the first question.\n\n"
+                    + generator_template
+                )
+            prompt_suffix = str(gen_cfg.get("prompt_suffix", "")).strip()
+            if prompt_suffix:
+                generator_template = generator_template.rstrip() + "\n\n" + prompt_suffix + "\n"
 
     solver_template = str(sol_cfg.get("prompt_template", ""))
+
+    judge_template = ""
+    if judge_cfg.get("prompt_template_path"):
+        judge_template = _load_text_maybe(str(judge_cfg["prompt_template_path"]), config_dir)
 
     verify_template = ""
     verify_path = str(judge_cfg.get("verify_prompt_template_path", "")).strip()
@@ -62,8 +83,68 @@ def _build_prompt_context(config_path: Path | None) -> dict[str, str]:
         "config_path": str(config_path),
         "generator_template": generator_template,
         "solver_template": solver_template,
+        "judge_template": judge_template,
         "verify_template": verify_template,
+        "generator_model": str(gen_cfg.get("api_model", gen_cfg.get("model_name_or_path", ""))),
+        "generator_max_new_tokens": str(gen_cfg.get("max_new_tokens", "")),
+        "solver_model": str(sol_cfg.get("api_model", sol_cfg.get("model_name_or_path", ""))),
+        "solver_max_new_tokens": str(sol_cfg.get("max_new_tokens", "")),
+        "judge_model": str(judge_cfg.get("api_model", judge_cfg.get("model_name_or_path", ""))),
+        "judge_max_new_tokens": str(judge_cfg.get("max_new_tokens", "")),
+        "judge_repeats_per_solution": str(judge_cfg.get("repeats_per_solution", "")),
+        "judge_python_assisted": str(judge_cfg.get("python_assisted", False)),
     }
+
+
+def _pairwise_section(row: dict[str, Any]) -> str:
+    pairs = row.get("pairwise_comparisons") or []
+    if not isinstance(pairs, list) or not pairs:
+        return ""
+
+    out: list[str] = []
+    out.append("## Pairwise Comparisons (Elo inputs)")
+    out.append("")
+    out.append(f"- Num comparisons: `{len(pairs)}`")
+    out.append("")
+
+    for p_idx, pair in enumerate(pairs, start=1):
+        i = pair.get("i")
+        j = pair.get("j")
+        out.append(f"### Pair {p_idx}: ({i} vs {j})")
+        out.append("")
+        out.append(f"- Prefs: `{json.dumps(pair.get('prefs', []), ensure_ascii=True)}`")
+        out.append(f"- Counts: `{json.dumps(pair.get('counts', {}), ensure_ascii=True)}`")
+        out.append(f"- Consistency: `{pair.get('consistency')}`")
+        out.append("")
+
+        trace = pair.get("judge_trace", {}) or {}
+        raw_prompt = trace.get("raw_prompt")
+        raw_outputs = trace.get("raw_outputs", []) or []
+        presentations = trace.get("presentations", []) or []
+        raw_prefs = trace.get("raw_prefs", []) or []
+        mapped_prefs = trace.get("mapped_prefs", []) or []
+
+        if raw_prompt:
+            out.append("Judge prompt:")
+            out.append("")
+            out.append(_fenced(str(raw_prompt)))
+            out.append("")
+        if presentations:
+            out.append(f"- Presentations: `{json.dumps(presentations, ensure_ascii=True)}`")
+        if raw_prefs:
+            out.append(f"- Raw A/B prefs: `{json.dumps(raw_prefs, ensure_ascii=True)}`")
+        if mapped_prefs:
+            out.append(f"- Mapped prefs (i/j encoding): `{json.dumps(mapped_prefs, ensure_ascii=True)}`")
+        if presentations or raw_prefs or mapped_prefs:
+            out.append("")
+        if raw_outputs:
+            for i_out, ro in enumerate(raw_outputs):
+                out.append(f"Judge raw output {i_out}:")
+                out.append("")
+                out.append(_fenced(str(ro)))
+                out.append("")
+
+    return "\n".join(out).rstrip() + "\n"
 
 
 def _row_readme(row: dict[str, Any], prompt_ctx: dict[str, str]) -> str:
@@ -90,10 +171,18 @@ def _row_readme(row: dict[str, Any], prompt_ctx: dict[str, str]) -> str:
         out.append("## Prompts Used")
         out.append("")
         out.append(f"- Config: `{prompt_ctx.get('config_path', '')}`")
+        out.append(f"- Generator model: `{prompt_ctx.get('generator_model', '')}`")
+        out.append(f"- Generator max_new_tokens: `{prompt_ctx.get('generator_max_new_tokens', '')}`")
+        out.append(f"- Solver model: `{prompt_ctx.get('solver_model', '')}`")
+        out.append(f"- Solver max_new_tokens: `{prompt_ctx.get('solver_max_new_tokens', '')}`")
+        out.append(f"- Judge model: `{prompt_ctx.get('judge_model', '')}`")
+        out.append(f"- Judge max_new_tokens: `{prompt_ctx.get('judge_max_new_tokens', '')}`")
+        out.append(f"- Judge repeats_per_solution: `{prompt_ctx.get('judge_repeats_per_solution', '')}`")
+        out.append(f"- Judge python_assisted: `{prompt_ctx.get('judge_python_assisted', '')}`")
         out.append("")
-        gen_template = prompt_ctx.get("generator_template", "")
+        gen_template = str(row.get("generator_prompt") or prompt_ctx.get("generator_template", ""))
         if gen_template:
-            out.append("Generator prompt template:")
+            out.append("Rendered generator prompt for this question:")
             out.append("")
             out.append(_fenced(gen_template))
             out.append("")
@@ -106,6 +195,12 @@ def _row_readme(row: dict[str, Any], prompt_ctx: dict[str, str]) -> str:
             out.append("Rendered solver prompt for this question:")
             out.append("")
             out.append(_fenced(solver_template.format(question=question)))
+            out.append("")
+        judge_template = prompt_ctx.get("judge_template", "")
+        if judge_template:
+            out.append("Judge prompt template (pairwise mode):")
+            out.append("")
+            out.append(_fenced(judge_template))
             out.append("")
         verify_template = prompt_ctx.get("verify_template", "")
         if verify_template:
@@ -165,6 +260,11 @@ def _row_readme(row: dict[str, Any], prompt_ctx: dict[str, str]) -> str:
     out.append(f"- Reliability: `{json.dumps(reliability, ensure_ascii=True)}`")
     out.append(f"- Ranking: `{json.dumps(ranking, ensure_ascii=True)}`")
     out.append("")
+
+    pairwise_md = _pairwise_section(row)
+    if pairwise_md:
+        out.append(pairwise_md.rstrip())
+        out.append("")
     return "\n".join(out)
 
 

@@ -1,0 +1,49 @@
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen2.5-7B-Instruct"
+  torch_dtype: "bfloat16"
+  use_flash_attn: true
+
+data:
+  mode: "offline"
+  schema_version: "self_play_verdict_grpo_v1"
+  rollout_jsonl_paths:
+    - "outputs/pairwise_rollouts_debug/samples_gemini25flash_single_verify_fast_100.jsonl"
+
+prompt:
+  template: |
+    You are a math question generator.
+
+    Generate one original math problem with a single integer answer.
+    The problem should be challenging, verifiable, and should not reveal the answer.
+
+    Output exactly one line:
+    QUESTION: <question text>
+
+rollout:
+  k: 4
+  temperature: 1.1
+  top_p: 0.9
+  max_new_tokens: 256
+
+train:
+  output_dir: "outputs/proposer_question_grpo"
+  steps: 500
+  prompts_per_step: 64
+  grad_accum_steps: 1
+
+  lr: 4.0e-6
+  warmup_steps: 100
+  weight_decay: 0.1
+  max_grad_norm: 1.0
+  kl_beta: 0.005
+
+  gradient_checkpointing: true
+  log_every: 1
+  save_every: 100
+
+  wandb:
+    enabled: true
+    project: "grpo-math"
+    run_name: "proposer-question-grpo"

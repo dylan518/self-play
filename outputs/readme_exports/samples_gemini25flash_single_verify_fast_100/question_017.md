@@ -1320,6 +1320,7 @@ Solution final test output does produce the original intended text
 ```typescript{
 
 ```
+
 ```
 
 Verifier result:
@@ -1331,6 +1332,7 @@ Verifier result:
 Verifier prompt:
 
 ```
+
 You are a strict math verifier.
 
 Question:
@@ -1340,6 +1342,7 @@ Candidate answer:
 18
 
 Rules:
+
 - Verify whether the candidate answer satisfies the question constraints.
 - Use concise reasoning to check the candidate answer directly.
 - Mark CORRECT only if the candidate answer is mathematically valid.
@@ -1357,28 +1360,36 @@ All three fields are required. If any field is missing, your output is invalid.
 Verifier raw output 0:
 
 ```
+
 VERDICT: INCORRECT
 CONFIDENCE: 0
 REASONING: The question is incomplete. It asks "Let $P(x)$ be a polynomial of degree 10 with integer coefficients such that", but then it stops without posing a question or a condition for $P(x)$. Therefore, a numerical answer like "18" cannot be verified.
+
 ```
 
 Verifier raw output 1:
 
 ```
+
 VERDICT: INCORRECT
 CONFIDENCE: 0.1
 REASONING: The question is incomplete. It asks for "Let P(x) be a polynomial of degree 10 with integer coefficients such that", but then does not provide any conditions or a question to be answered. Therefore, a numerical answer like 18 cannot be verified.
+
 ```
 
 Verifier raw output 2:
 
 ```
+
 VERDICT: INCORRECT
 CONFIDENCE: 0
 REASONING: The question is incomplete. It asks "Let $P(x)$ be a polynomial of degree 10 with integer coefficients such that", but then it stops without posing a question or a condition for $P(x)$. Therefore, a numerical answer like "18" cannot be verified.
+
 ```
 
 ## Reliability and Ranking
 
 - Reliability: `{"preference_stability": 1.0, "num_pairs": 0, "repeats_per_pair": 1, "num_solutions_verified": 10, "repeats_per_solution": 3, "r_sep": 0.0, "group_verify_means": [0.0, 0.0]}`
 - Ranking: `{"method": "verify_score", "k_factor": 24.0, "initial_rating": 1000.0}`
+```
+

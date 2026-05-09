@@ -22,6 +22,11 @@ generator:
   use_chat_template: false
   enable_thinking: false
   prompt_template_path: "grpo_math/prompts/question_generator_prompt.txt"
+  question_bank:
+    enabled: true
+    path: "examples.json"
+    num_examples: 8
+    compatible_only: false
   temperature: 1.1
   top_p: 0.9
   max_new_tokens: 512

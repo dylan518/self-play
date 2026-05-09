@@ -1,4 +1,5 @@
 # R_sep Experiment Report (Feb 19 v3)
+
 **Date:** 2026-02-19
 **Config:** `pairwise_rollouts_gemini25flash_single_verify_fast.yaml`
 **Model:** Gemini 2.5 Flash (generator + solver + judge), GPT-5.2 (oracle)
@@ -8,27 +9,31 @@
 
 ## What Changed vs v2
 
-| Parameter | v2 | v3 |
-|---|---|---|
-| num_questions | 10 | **20** |
-| sampling groups | 1 group (temp=1.0) | **2 groups: strong (temp=0.3), weak (temp=2.0)** |
-| solution_group field | missing | **added to every solution** |
-| r_sep field | missing | **added to reliability dict** |
-| skip non-parsed solutions | no (sent "NONE" to verifier) | **yes (auto-INCORRECT)** |
-| judge temperature | 0.3 | 0.3 |
+
+| Parameter                 | v2                           | v3                                               |
+| ------------------------- | ---------------------------- | ------------------------------------------------ |
+| num_questions             | 10                           | **20**                                           |
+| sampling groups           | 1 group (temp=1.0)           | **2 groups: strong (temp=0.3), weak (temp=2.0)** |
+| solution_group field      | missing                      | **added to every solution**                      |
+| r_sep field               | missing                      | **added to reliability dict**                    |
+| skip non-parsed solutions | no (sent "NONE" to verifier) | **yes (auto-INCORRECT)**                         |
+| judge temperature         | 0.3                          | 0.3                                              |
+
 
 ---
 
 ## Quality Baseline
 
-| Metric | Value |
-|---|---|
-| Unique questions | 20/20 (0% duplicates) |
-| Oracle failures | 0/20 |
-| Parse rate | **97%** (194/200 — best so far) |
-| Verifier accuracy | **82.5%** |
-| Precision | **85.4%** |
-| Recall | **90.8%** |
+
+| Metric            | Value                           |
+| ----------------- | ------------------------------- |
+| Unique questions  | 20/20 (0% duplicates)           |
+| Oracle failures   | 0/20                            |
+| Parse rate        | **97%** (194/200 — best so far) |
+| Verifier accuracy | **82.5%**                       |
+| Precision         | **85.4%**                       |
+| Recall            | **90.8%**                       |
+
 
 97% parse rate is the result of skipping non-parsed solutions before verification — the "NONE" candidate answers were causing noise.
 
@@ -36,11 +41,13 @@
 
 ## distinct_correct as Verifiability Signal (Confirmed at Scale)
 
+
 | Bucket | Questions | Avg FP rate |
-|---|---|---|
-| dc = 0 | 1 | 0% |
-| dc = 1 | 15 | 7% |
-| dc ≥ 2 | 4 | **44%** |
+| ------ | --------- | ----------- |
+| dc = 0 | 1         | 0%          |
+| dc = 1 | 15        | 7%          |
+| dc ≥ 2 | 4         | **44%**     |
+
 
 **Pearson r (distinct_correct vs fp_rate): +0.327** — meaningful positive signal across 20 questions.
 
@@ -54,28 +61,30 @@ Questions with `distinct_correct > 1` have 6× higher false positive rate than d
 
 ### Per-question R_sep (strong group mean - weak group mean)
 
-| Q | Oracle | g0 mean | g1 mean | R_sep | Note |
-|---|---|---|---|---|---|
-| Q0 | 16 | 0.00 | 0.60 | -0.60 | Verifier FP on weak answers |
-| Q1 | 2 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q2 | 800 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q3 | 800 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q4 | 4 | 0.93 | 0.80 | **+0.13** | Weak signal |
-| Q5 | 14 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q6 | 2021 | 0.80 | 1.00 | -0.20 | Verifier FP on weak answers |
-| Q7 | 34 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q8 | 722 | 0.40 | 0.40 | 0.00 | Both noisy |
-| Q9 | 12 | 1.00 | 0.80 | **+0.20** | ✓ |
-| Q10 | 50 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q11 | 46 | 0.07 | 0.80 | -0.73 | Verifier FP on weak answers |
-| Q12 | 722 | 0.20 | 0.33 | -0.13 | Both noisy |
-| Q13 | 800 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q14 | 7 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q15 | 0 | 0.00 | 0.20 | -0.20 | Verifier FP on weak answers |
-| Q16 | 11 | 0.00 | 0.00 | 0.00 | Both fail |
-| Q17 | 75 | 1.00 | 1.00 | 0.00 | Both perfect |
-| Q18 | 49 | 0.80 | 1.00 | -0.20 | Verifier FP on weak answers |
-| Q19 | 6 | 1.00 | 1.00 | 0.00 | Both perfect |
+
+| Q   | Oracle | g0 mean | g1 mean | R_sep     | Note                        |
+| --- | ------ | ------- | ------- | --------- | --------------------------- |
+| Q0  | 16     | 0.00    | 0.60    | -0.60     | Verifier FP on weak answers |
+| Q1  | 2      | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q2  | 800    | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q3  | 800    | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q4  | 4      | 0.93    | 0.80    | **+0.13** | Weak signal                 |
+| Q5  | 14     | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q6  | 2021   | 0.80    | 1.00    | -0.20     | Verifier FP on weak answers |
+| Q7  | 34     | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q8  | 722    | 0.40    | 0.40    | 0.00      | Both noisy                  |
+| Q9  | 12     | 1.00    | 0.80    | **+0.20** | ✓                           |
+| Q10 | 50     | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q11 | 46     | 0.07    | 0.80    | -0.73     | Verifier FP on weak answers |
+| Q12 | 722    | 0.20    | 0.33    | -0.13     | Both noisy                  |
+| Q13 | 800    | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q14 | 7      | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q15 | 0      | 0.00    | 0.20    | -0.20     | Verifier FP on weak answers |
+| Q16 | 11     | 0.00    | 0.00    | 0.00      | Both fail                   |
+| Q17 | 75     | 1.00    | 1.00    | 0.00      | Both perfect                |
+| Q18 | 49     | 0.80    | 1.00    | -0.20     | Verifier FP on weak answers |
+| Q19 | 6      | 1.00    | 1.00    | 0.00      | Both perfect                |
+
 
 **Mean R_sep = -0.087** | **Fraction positive = 10%**
 
@@ -94,6 +103,7 @@ Two root causes:
 **Pearson r (R_sep vs oracle_accuracy per question): +0.717**
 
 Despite the mean being negative, R_sep measured by the verifier IS correlated with oracle accuracy across questions:
+
 - Questions where strong group outscores weak (R_sep > 0) → oracle accuracy is highest
 - Questions where weak group outscores strong (R_sep < 0) → oracle accuracy is lower (FP inflation)
 
@@ -105,14 +115,16 @@ This validates the core hypothesis: **R_sep is a signal about question quality**
 
 `agg confidence` now has 2 distinct values (`{0.67, 1.0}`) — judge temp=0.3 is producing some genuine 2/3 disagreements. Previously always 1.0.
 
-| Confidence bucket | n | Accuracy |
-|---|---|---|
-| 0.0 | 6 | 100.0% (auto-marked non-parsed) |
-| 0.5 | 8 | 87.5% |
-| 0.7 | 3 | 66.7% |
-| 0.8 | 6 | 83.3% |
-| 0.9 | 3 | 66.7% |
-| 1.0 | 174 | 82.2% |
+
+| Confidence bucket | n   | Accuracy                        |
+| ----------------- | --- | ------------------------------- |
+| 0.0               | 6   | 100.0% (auto-marked non-parsed) |
+| 0.5               | 8   | 87.5%                           |
+| 0.7               | 3   | 66.7%                           |
+| 0.8               | 6   | 83.3%                           |
+| 0.9               | 3   | 66.7%                           |
+| 1.0               | 174 | 82.2%                           |
+
 
 Confidence is near-flat across all buckets — the judge doesn't distinguish hard vs easy. Persistent negative Pearson r (-0.071) between stated confidence and actual accuracy.
 
@@ -120,24 +132,27 @@ Confidence is near-flat across all buckets — the judge doesn't distinguish har
 
 ## Metric Progression
 
-| Metric | Feb 17 | Feb 19 v2 | Feb 19 v3 |
-|---|---|---|---|
-| Questions | 10 | 10 | **20** |
-| Duplicate rate | 30% | 0% | **0%** |
-| Parse rate | 32% | 67% | **97%** |
-| Oracle failures | all | 0 | **0** |
-| Verifier accuracy | N/A | 78.3% | **82.5%** |
-| Precision | N/A | 69.2% | **85.4%** |
-| distinct_correct Pearson r | — | — | **+0.327** |
-| R_sep mean | — | +0.020 | -0.087 (noisy) |
-| R_sep vs oracle Pearson r | — | -0.222 | **+0.717** |
-| agg confidence range | {1.0} | {1.0} | **{0.67, 1.0}** |
+
+| Metric                     | Feb 17 | Feb 19 v2 | Feb 19 v3       |
+| -------------------------- | ------ | --------- | --------------- |
+| Questions                  | 10     | 10        | **20**          |
+| Duplicate rate             | 30%    | 0%        | **0%**          |
+| Parse rate                 | 32%    | 67%       | **97%**         |
+| Oracle failures            | all    | 0         | **0**           |
+| Verifier accuracy          | N/A    | 78.3%     | **82.5%**       |
+| Precision                  | N/A    | 69.2%     | **85.4%**       |
+| distinct_correct Pearson r | —      | —         | **+0.327**      |
+| R_sep mean                 | —      | +0.020    | -0.087 (noisy)  |
+| R_sep vs oracle Pearson r  | —      | -0.222    | **+0.717**      |
+| agg confidence range       | {1.0}  | {1.0}     | **{0.67, 1.0}** |
+
 
 ---
 
 ## Conclusions and Next Steps
 
 ### What's Working
+
 - **Parser**: 97% parse rate, stable
 - **Oracle**: 0 failures across 20 questions
 - **distinct_correct filter**: Reliable oracle-free quality gate. dc > 1 → 44% FP rate. dc = 1 → 7% FP rate.
@@ -147,10 +162,12 @@ Confidence is near-flat across all buckets — the judge doesn't distinguish har
 ### What R_sep Needs to Work as a Training Signal
 
 Temperature gap alone is insufficient because:
+
 1. Simple arithmetic questions are too easy — temp=2.0 still solves them correctly
 2. Verifier FPs on high-temp verbose outputs invert R_sep on some questions
 
 **Fix: Use a genuinely weaker model for group 1.** Capability gap > temperature gap:
+
 ```yaml
 sampling_groups:
   - count: 5
@@ -163,9 +180,11 @@ sampling_groups:
 The model swap creates a stable capability gap on questions at the right difficulty level, independent of whether temp=2.0 happens to output correctly.
 
 ### Action Items
-| Priority | Item |
-|---|---|
-| High | Switch weak group to `gemini-2.0-flash-lite` (model capability gap vs temperature noise) |
-| High | Filter training questions by `distinct_correct == 1 AND R_sep > 0` — oracle-free quality gate |
-| Medium | Generate harder questions (3-5 step computation, not pure single-step arithmetic) — creates genuine difficulty gap |
-| Medium | Investigate conf calibration — judge states 1.0 for 87% of verifications regardless of difficulty |
+
+
+| Priority | Item                                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------------ |
+| High     | Switch weak group to `gemini-2.0-flash-lite` (model capability gap vs temperature noise)                           |
+| High     | Filter training questions by `distinct_correct == 1 AND R_sep > 0` — oracle-free quality gate                      |
+| Medium   | Generate harder questions (3-5 step computation, not pure single-step arithmetic) — creates genuine difficulty gap |
+| Medium   | Investigate conf calibration — judge states 1.0 for 87% of verifications regardless of difficulty                  |

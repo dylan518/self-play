@@ -19,7 +19,11 @@ Solution A:
 Solution B:
 {answer_b}
 
-Output exactly one line:
+First, briefly justify your choice (1-6 short lines).
+Then output your final choice on the last line.
+
+Output exactly in this format:
+REASONING: <brief justification, 1-6 lines total including this line>
 PREFERENCE: A
 or
 PREFERENCE: B

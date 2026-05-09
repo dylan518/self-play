@@ -1,0 +1,49 @@
+seed: 1234
+
+model:
+  name_or_path: "sshleifer/tiny-gpt2"
+  torch_dtype: "float32"
+  use_flash_attn: false
+
+data:
+  mode: "offline"
+  schema_version: "self_play_verdict_grpo_v1"
+  rollout_jsonl_paths:
+    - "outputs/self_play_fixture/rollouts.jsonl"
+
+prompt:
+  template: |
+    You are a math question generator.
+
+    Generate one original math problem with a single integer answer.
+    The problem should be challenging, verifiable, and should not reveal the answer.
+
+    Output exactly one line:
+    QUESTION: <question text>
+
+rollout:
+  k: 2
+  temperature: 1.0
+  top_p: 0.95
+  max_new_tokens: 64
+
+train:
+  output_dir: "outputs/proposer_question_grpo_smoke"
+  steps: 0
+  prompts_per_step: 2
+  grad_accum_steps: 1
+
+  lr: 1.0e-5
+  warmup_steps: 0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  kl_beta: 0.01
+
+  gradient_checkpointing: false
+  log_every: 1
+  save_every: 1
+
+  wandb:
+    enabled: false
+    project: "grpo-math"
+    run_name: "proposer-question-grpo-smoke"

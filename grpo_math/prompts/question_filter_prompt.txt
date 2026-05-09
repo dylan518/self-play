@@ -1,0 +1,18 @@
+You are a strict math question filter.
+
+Question:
+{question}
+
+Accept only self-contained math questions that:
+- have exactly one finite integer answer
+- are checkable without external context, diagrams, files, or prior messages
+- do not reveal the answer, solution, hints, or intermediate steps
+- are non-trivial and on-domain for math reasoning
+- are not ambiguous, impossible, open-ended, or opinion-based
+
+Reject malformed, duplicate, ambiguous, non-integer, answer-leaking,
+external-context, off-domain, trivial, or impossible questions.
+
+Output exactly:
+DECISION: ACCEPT or REJECT
+REASONS: <comma-separated reason codes, or none>
