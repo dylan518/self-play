@@ -19,10 +19,23 @@ from transformers.trainer_callback import TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 
 from grpo_math.data.gsm8k import load_gsm8k
-from grpo_math.data.reward import extract_final_answer_int_strict, extract_ground_truth_int
+from grpo_math.data.reward import (
+    canonicalize_final_answer_text,
+    extract_final_answer_int,
+    extract_final_answer_int_strict,
+    extract_ground_truth_int,
+    final_answer_tail_char_count,
+)
+from grpo_math.self_play.generate_pairwise_data import _openai_generate_texts as _rollout_openai_generate_texts
+from grpo_math.self_play.question_rewards import compute_question_reward
+from grpo_math.self_play.question_bank import render_question_bank_block_from_config
 
 _VERDICT_RE = re.compile(r"VERDICT:\s*(CORRECT|INCORRECT)", flags=re.IGNORECASE)
 _BOOL_VERDICT_RE = re.compile(r"\b(TRUE|FALSE)\b", flags=re.IGNORECASE)
+_QUESTION_RE = re.compile(r"QUESTION:\s*(.+)", flags=re.IGNORECASE | re.DOTALL)
+_CONFIRM_LINE_RE = re.compile(r"CONFIRM\s*:\s*([^\n\r]+)", flags=re.IGNORECASE)
+_CONFIRM_RE = _CONFIRM_LINE_RE
+_DIFFERENT_FROM_SAMPLES_RE = re.compile(r"different_from_samples\s*=\s*(yes|no)", flags=re.IGNORECASE)
 
 
 def _load_yaml(path: str) -> Dict[str, Any]:
@@ -44,6 +57,8 @@ def _make_dataset(cfg: Dict[str, Any], split: str, max_samples: int | None) -> D
     data_source = str(cfg.get("data", {}).get("source", "gsm8k")).strip().lower()
     if data_source == "pairwise_jsonl":
         return _make_pairwise_jsonl_dataset(cfg, split=split, max_samples=max_samples)
+    if data_source == "question_generation":
+        return _make_question_generation_dataset(cfg, split=split, max_samples=max_samples)
 
     ex = load_gsm8k(
         dataset_name=cfg["data"]["dataset_name"],
@@ -79,6 +94,11 @@ def _make_pairwise_jsonl_dataset(cfg: Dict[str, Any], split: str, max_samples: i
             if not raw:
                 continue
             row = json.loads(raw)
+            filter_result = row.get("filter_result")
+            if row.get("trainable_for_solver") is False or row.get("accepted") is False:
+                continue
+            if isinstance(filter_result, dict) and filter_result.get("accepted") is False:
+                continue
             q = str(row.get("question", "")).strip()
             if not q:
                 continue
@@ -106,6 +126,58 @@ def _make_pairwise_jsonl_dataset(cfg: Dict[str, Any], split: str, max_samples: i
         selected = selected[: max(0, int(max_samples))]
 
     rows = [{"prompt": prompt_template.format(question=q), "question": q} for q in selected]
+    return Dataset.from_list(rows)
+
+
+def _trim_dataset_for_generation_groups(ds: Dataset, num_generations: int) -> Dataset:
+    """Keep train/eval dataset lengths compatible with TRL GRPO grouping."""
+    k = max(1, int(num_generations))
+    n = len(ds)
+    if n == 0 or n % k == 0:
+        return ds
+    trimmed = n - (n % k)
+    if trimmed <= 0:
+        # With fewer prompts than k, keep the data and let batch sizing below use
+        # a single group. This is mainly for tiny debug/eval calls.
+        return ds
+    return ds.select(range(trimmed))
+
+
+def _make_question_generation_dataset(cfg: Dict[str, Any], split: str, max_samples: int | None) -> Dataset:
+    if split not in {"train", "eval"}:
+        raise ValueError(f"Unsupported split for question_generation: {split!r}")
+    data_cfg = cfg.get("data", {}) if isinstance(cfg.get("data"), dict) else {}
+    prompt_cfg = cfg.get("prompt", {}) if isinstance(cfg.get("prompt"), dict) else {}
+    seed = int(cfg.get("seed", 1234))
+    prompt_template = str(prompt_cfg.get("template", "Output exactly one line:\nQUESTION: <question text>"))
+    prompt_template_path = str(prompt_cfg.get("template_path", "")).strip()
+    if prompt_template_path:
+        prompt_template = Path(prompt_template_path).read_text(encoding="utf-8")
+    question_bank_examples = render_question_bank_block_from_config(
+        {
+            "question_bank": {
+                "enabled": True,
+                "path": str(data_cfg.get("question_bank_path", "examples.json")),
+                "num_examples": int(data_cfg.get("num_examples", 3)),
+                "seed": int(data_cfg.get("question_bank_seed", seed + (0 if split == "train" else 10_000))),
+                "compatible_only": bool(data_cfg.get("compatible_only", False)),
+            }
+        },
+        seed=seed + (0 if split == "train" else 10_000),
+    )
+    num_prompts = int(data_cfg.get("num_prompts", 64))
+    if split == "eval":
+        num_prompts = max(1, int(data_cfg.get("num_eval_prompts", max(1, num_prompts // 10))))
+    if max_samples is not None:
+        num_prompts = min(num_prompts, max(0, int(max_samples)))
+    rows = []
+    for idx in range(num_prompts):
+        rows.append(
+            {
+                "prompt": prompt_template.format(question_bank_examples=question_bank_examples),
+                "question_seed": str(seed + idx),
+            }
+        )
     return Dataset.from_list(rows)
 
 
@@ -178,19 +250,58 @@ def _parse_verdict(text: str) -> str:
     return "INCORRECT"
 
 
+def _extract_generated_question(text: str) -> str | None:
+    raw = str(text or "").strip()
+    m = _QUESTION_RE.search(raw)
+    q = m.group(1).strip() if m else raw
+    if not q:
+        return None
+    nonempty_lines = [line.strip() for line in q.splitlines() if line.strip()]
+    if not nonempty_lines:
+        return None
+    q = nonempty_lines[0]
+    q = re.sub(r"^\s*[-*\d.)]+\s*", "", q).strip()
+    q = re.sub(r"^QUESTION\s*:\s*", "", q, flags=re.IGNORECASE).strip()
+    q = re.sub(r"\s*CONFIRM\s*:.*$", "", q, flags=re.IGNORECASE | re.DOTALL).strip()
+    return q if len(q) >= 12 else None
+
+
+def _confirm_different_from_samples(text: str) -> bool:
+    m = _CONFIRM_LINE_RE.search(str(text or ""))
+    if not m:
+        return False
+    confirm = m.group(1).strip()
+    dm = _DIFFERENT_FROM_SAMPLES_RE.search(confirm)
+    integer_ok = re.search(r"integer_answer\s*=\s*yes", confirm, flags=re.IGNORECASE) is not None
+    self_correction = re.search(
+        r"\b(wait|revised\s+question|better\s+question|answer\s+is|final_answer)\b",
+        confirm,
+        flags=re.IGNORECASE,
+    )
+    concise = len(confirm) <= 400 and "\n" not in confirm
+    return bool(dm and dm.group(1).lower() == "yes" and integer_ok and concise and not self_correction)
+
+
 def _build_verdict_teacher_prompts(
     *,
     questions: List[str],
     completions: List[str],
     teacher_template: str,
+    allow_lenient_answer: bool = False,
 ) -> tuple[List[int], List[str]]:
     valid_indices: List[int] = []
     verify_prompts: List[str] = []
     for idx, (q, c) in enumerate(zip(questions, completions, strict=True)):
-        if extract_final_answer_int_strict(c) is None:
-            continue
+        candidate_answer = canonicalize_final_answer_text(c)
+        if candidate_answer is None:
+            if not allow_lenient_answer:
+                continue
+            pred = extract_final_answer_int(c)
+            if pred is None:
+                continue
+            candidate_answer = f"{c.rstrip()}\n\nFINAL_ANSWER: {pred}"
         valid_indices.append(idx)
-        verify_prompts.append(teacher_template.format(question=q, candidate_answer=c))
+        verify_prompts.append(teacher_template.format(question=q, candidate_answer=candidate_answer))
     return valid_indices, verify_prompts
 
 
@@ -207,47 +318,25 @@ def _openai_generate_texts(
     max_tokens_param: str = "max_completion_tokens",
     max_retries: int = 6,
     initial_backoff_s: float = 1.0,
+    extra_body: Dict[str, Any] | None = None,
+    max_parallel: int = 1,
 ) -> List[str]:
-    outputs: List[str] = []
-    for prompt in prompts:
-        payload: Dict[str, Any] = {
-            "model": model,
-            "temperature": temperature,
-            "top_p": top_p,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        payload[max_tokens_param] = max_completion_tokens
-        backoff_s = max(0.0, initial_backoff_s)
-        attempt = 0
-        while True:
-            attempt += 1
-            req = urllib.request.Request(
-                url=base_url.rstrip("/") + "/chat/completions",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
-                outputs.append(_extract_chat_content(body))
-                break
-            except urllib.error.HTTPError as e:
-                if e.code in (429, 500, 502, 503, 504) and attempt <= max_retries:
-                    time.sleep(backoff_s)
-                    backoff_s = min(backoff_s * 2.0, 30.0)
-                    continue
-                raise
-            except Exception:
-                if attempt <= max_retries:
-                    time.sleep(backoff_s)
-                    backoff_s = min(backoff_s * 2.0, 30.0)
-                    continue
-                raise
-    return outputs
+    return _rollout_openai_generate_texts(
+        prompts=prompts,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature,
+        top_p=top_p,
+        max_completion_tokens=max_completion_tokens,
+        timeout_s=timeout_s,
+        max_tokens_param=max_tokens_param,
+        extra_body=extra_body,
+        include_reasoning=False,
+        max_retries=max_retries,
+        initial_backoff_s=initial_backoff_s,
+        max_parallel=max_parallel,
+    )
 
 
 def _maybe_build_lora_config(cfg: Dict[str, Any]) -> Any | None:
@@ -390,17 +479,45 @@ def main() -> None:
     def reward_correct(*, prompts: List[str], completions: List[str], answer_text: List[str], **_: Any) -> List[float]:
         out: List[float] = []
         for c, gt_text in zip(completions, answer_text, strict=True):
-            pred = extract_final_answer_int_strict(c)
+            canonical = canonicalize_final_answer_text(c)
+            pred = extract_final_answer_int_strict(canonical or c)
             gt = extract_ground_truth_int(gt_text)
             out.append(1.0 if (pred is not None and gt is not None and pred == gt) else 0.0)
         return out
 
     def reward_format(*, prompts: List[str], completions: List[str], **_: Any) -> List[float]:
         # Format-only metric: did the model produce a parseable FINAL_ANSWER?
+        allow_lenient = bool(cfg.get("reward", {}).get("format_lenient_final_answer", False))
         out: List[float] = []
         for c in completions:
-            out.append(1.0 if extract_final_answer_int_strict(c) is not None else 0.0)
+            tail_chars = final_answer_tail_char_count(c)
+            if tail_chars is not None:
+                out.append(1.0 if tail_chars == 0 else 0.5)
+            elif allow_lenient and extract_final_answer_int(c) is not None:
+                out.append(0.25)
+            else:
+                out.append(0.0)
         return out
+
+    def reward_answer_boundary(*, prompts: List[str], completions: List[str], **_: Any) -> List[float]:
+        del prompts
+        rewards: List[float] = []
+        for c in completions:
+            tail_chars = final_answer_tail_char_count(c)
+            if tail_chars is None:
+                rewards.append(0.0)
+            elif tail_chars == 0:
+                rewards.append(1.0)
+            else:
+                rewards.append(max(0.0, 1.0 - min(tail_chars, 400) / 400.0))
+        return rewards
+
+    def reward_question_format(*, prompts: List[str], completions: List[str], **_: Any) -> List[float]:
+        del prompts
+        return [
+            1.0 if (_extract_generated_question(c) is not None and _confirm_different_from_samples(c)) else 0.0
+            for c in completions
+        ]
 
     def reward_verdict(*, prompts: List[str], completions: List[str], question: List[str], **_: Any) -> List[float]:
         if not teacher_api_key:
@@ -413,6 +530,7 @@ def main() -> None:
             questions=question,
             completions=completions,
             teacher_template=teacher_template,
+            allow_lenient_answer=bool(cfg.get("reward", {}).get("verdict_lenient_final_answer", False)),
         )
         if verify_prompts:
             judge_outputs = _openai_generate_texts(
@@ -427,9 +545,123 @@ def main() -> None:
                 max_tokens_param=str(teacher_cfg.get("api_max_tokens_param", "max_completion_tokens")),
                 max_retries=int(teacher_cfg.get("api_max_retries", 6)),
                 initial_backoff_s=float(teacher_cfg.get("api_backoff_initial_s", 1.0)),
+                extra_body=teacher_cfg.get("api_extra_body", None),
+                max_parallel=int(teacher_cfg.get("api_max_parallel", 1)),
             )
             for idx, out in zip(valid_indices, judge_outputs, strict=True):
                 rewards[idx] = 1.0 if _parse_verdict(out) == "CORRECT" else 0.0
+        return rewards
+
+    question_reward_cfg = cfg.get("reward", {}).get("question", {})
+
+    def reward_question(*, prompts: List[str], completions: List[str], **_: Any) -> List[float]:
+        del prompts
+        solver_cfg = question_reward_cfg.get("solver", {})
+        judge_cfg = question_reward_cfg.get("judge", {})
+        solver_api_key = _resolve_api_key(solver_cfg)
+        judge_api_key = _resolve_api_key(judge_cfg)
+        if not solver_api_key or not judge_api_key:
+            raise RuntimeError("reward.mode=question requires reward.question.solver/judge API keys.")
+
+        extracted_questions = [_extract_generated_question(c) for c in completions]
+        confirm_ok = [_confirm_different_from_samples(c) for c in completions]
+        rewards = [0.0 for _ in completions]
+        confirm_soft_reward = float(question_reward_cfg.get("confirm_soft_reward", 0.2))
+        for idx, q in enumerate(extracted_questions):
+            if q and not confirm_ok[idx]:
+                rewards[idx] = max(0.0, min(1.0, confirm_soft_reward))
+        valid_items = [(idx, q) for idx, q in enumerate(extracted_questions) if q and confirm_ok[idx]]
+        if not valid_items:
+            return rewards
+
+        num_solutions = int(question_reward_cfg.get("num_solutions_per_question", 4))
+        repeats = int(question_reward_cfg.get("judge_repeats_per_question", 3))
+        solver_prompts: list[str] = []
+        solver_owner: list[int] = []
+        solver_prompt_template = str(
+            question_reward_cfg.get(
+                "solver_prompt_template",
+                "Question:\n{question}\n\nPut the final answer first.\nFINAL_ANSWER: <integer>",
+            )
+        )
+        for idx, question_text in valid_items:
+            for _rep in range(num_solutions):
+                solver_owner.append(idx)
+                solver_prompts.append(solver_prompt_template.format(question=question_text))
+
+        solver_outputs = _rollout_openai_generate_texts(
+            prompts=solver_prompts,
+            model=str(solver_cfg.get("api_model", "Qwen/Qwen3.5-9B")),
+            api_key=solver_api_key,
+            base_url=str(solver_cfg.get("api_base_url", "http://127.0.0.1:8001/v1")),
+            temperature=float(solver_cfg.get("temperature", 1.2)),
+            top_p=float(solver_cfg.get("top_p", 0.98)),
+            max_completion_tokens=int(solver_cfg.get("max_new_tokens", 2048)),
+            timeout_s=float(solver_cfg.get("api_timeout_s", 180.0)),
+            max_tokens_param=str(solver_cfg.get("api_max_tokens_param", "max_tokens")),
+            reasoning_effort=str(solver_cfg.get("api_reasoning_effort", "")),
+            extra_body=solver_cfg.get("api_extra_body", None),
+            include_reasoning=bool(solver_cfg.get("include_reasoning_in_output", False)),
+            tokenizer_name_or_path=str(solver_cfg.get("api_tokenizer_name_or_path", "")),
+            final_max_tokens=int(solver_cfg["api_final_max_tokens"]) if solver_cfg.get("api_final_max_tokens") is not None else None,
+            final_prefill=str(solver_cfg.get("api_final_prefill", "FINAL_ANSWER: ")),
+            min_interval_s=float(solver_cfg.get("api_min_interval_s", 0.0)),
+            max_retries=int(solver_cfg.get("api_max_retries", 4)),
+            initial_backoff_s=float(solver_cfg.get("api_backoff_initial_s", 0.5)),
+            max_parallel=int(solver_cfg.get("api_max_parallel", 4)),
+        )
+
+        judge_prompts: list[str] = []
+        judge_owner: list[int] = []
+        verify_template_path = str(judge_cfg.get("verify_prompt_template_path", "")).strip()
+        if verify_template_path:
+            verify_template = Path(verify_template_path).read_text(encoding="utf-8")
+        else:
+            verify_template = str(
+                judge_cfg.get(
+                    "verify_prompt_template",
+                    "Question:\n{question}\n\nCandidate answer:\n{candidate_answer}\n\nVERDICT: CORRECT or INCORRECT",
+                )
+            )
+        for owner, solution in zip(solver_owner, solver_outputs, strict=True):
+            if extract_final_answer_int_strict(solution) is None:
+                continue
+            q = extracted_questions[owner]
+            if not q:
+                continue
+            for _rep in range(repeats):
+                judge_owner.append(owner)
+                judge_prompts.append(verify_template.format(question=q, candidate_answer=solution))
+
+        verdicts_by_idx: dict[int, list[str]] = {idx: [] for idx, _q in valid_items}
+        if judge_prompts:
+            judge_outputs = _rollout_openai_generate_texts(
+                prompts=judge_prompts,
+                model=str(judge_cfg.get("api_model", "Qwen/Qwen3.5-9B")),
+                api_key=judge_api_key,
+                base_url=str(judge_cfg.get("api_base_url", "http://127.0.0.1:8001/v1")),
+                temperature=float(judge_cfg.get("temperature", 0.0)),
+                top_p=float(judge_cfg.get("top_p", 1.0)),
+                max_completion_tokens=int(judge_cfg.get("max_new_tokens", 256)),
+                timeout_s=float(judge_cfg.get("api_timeout_s", 180.0)),
+                max_tokens_param=str(judge_cfg.get("api_max_tokens_param", "max_tokens")),
+                reasoning_effort=str(judge_cfg.get("api_reasoning_effort", "")),
+                extra_body=judge_cfg.get("api_extra_body", None),
+                max_retries=int(judge_cfg.get("api_max_retries", 4)),
+                initial_backoff_s=float(judge_cfg.get("api_backoff_initial_s", 0.5)),
+                max_parallel=int(judge_cfg.get("api_max_parallel", 4)),
+            )
+            for owner, judge_output in zip(judge_owner, judge_outputs, strict=True):
+                verdicts_by_idx.setdefault(owner, []).append(_parse_verdict(judge_output))
+
+        for idx, question_text in valid_items:
+            del question_text
+            breakdown = compute_question_reward(
+                accepted=True,
+                verdicts=verdicts_by_idx.get(idx, []),
+                lambda_verifiability=float(question_reward_cfg.get("lambda_verifiability", 0.35)),
+            )
+            rewards[idx] = float(breakdown.reward)
         return rewards
 
     class _WandbMetricAliasesCallback(TrainerCallback):
@@ -457,10 +689,16 @@ def main() -> None:
     out_dir = str(args.output_dir or cfg["train"]["output_dir"])
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     prompts_per_step = int(cfg["train"]["prompts_per_step"])
+    num_generations = int(cfg["rollout"]["k"])
+    if reward_mode in {"verdict", "correctness"}:
+        train_ds = _trim_dataset_for_generation_groups(train_ds, num_generations)
     # Keep per-device batch size sane for tiny debug runs as well.
     per_device_bsz_target = max(1, prompts_per_step // max(1, world_size))
     per_device_bsz_cap = max(1, len(train_ds) // max(1, world_size))
     per_device_bsz = max(1, min(per_device_bsz_target, per_device_bsz_cap))
+    if reward_mode in {"verdict", "correctness"} and per_device_bsz >= num_generations:
+        per_device_bsz -= per_device_bsz % num_generations
+        per_device_bsz = max(num_generations, per_device_bsz)
 
     wandb_cfg = cfg.get("train", {}).get("wandb", {}) if isinstance(cfg.get("train"), dict) else {}
     wandb_enabled = bool(wandb_cfg.get("enabled", False))
@@ -478,11 +716,29 @@ def main() -> None:
         if isinstance(wandb_tags, list) and wandb_tags:
             os.environ.setdefault("WANDB_TAGS", ",".join(str(x) for x in wandb_tags))
     if reward_mode == "verdict":
-        reward_funcs = [reward_verdict, reward_format]
+        reward_funcs = [reward_verdict, reward_format, reward_answer_boundary]
+        reward_weights = [
+            float(cfg["reward"].get("verdict_weight", 1.0)),
+            float(cfg["reward"].get("format_weight", 0.0)),
+            float(cfg["reward"].get("answer_boundary_weight", 0.0)),
+        ]
     elif reward_mode == "correctness":
-        reward_funcs = [reward_correct, reward_format]
+        reward_funcs = [reward_correct, reward_format, reward_answer_boundary]
+        reward_weights = [
+            float(cfg["reward"].get("correctness_weight", 1.0)),
+            float(cfg["reward"].get("format_weight", 0.0)),
+            float(cfg["reward"].get("answer_boundary_weight", 0.0)),
+        ]
+    elif reward_mode == "question":
+        reward_funcs = [reward_question, reward_question_format]
+        reward_weights = [
+            float(cfg["reward"].get("question_weight", 1.0)),
+            float(cfg["reward"].get("question_format_weight", 0.1)),
+        ]
     else:
-        raise ValueError(f"Unsupported reward.mode: {reward_mode} (use 'correctness' or 'verdict')")
+        raise ValueError(
+            f"Unsupported reward.mode: {reward_mode} (use 'correctness', 'verdict', or 'question')"
+        )
     peft_config = _maybe_build_lora_config(cfg)
     # If model is already a loaded PEFT adapter checkpoint, do not wrap with a new peft_config.
     if loaded_adapter_checkpoint:
@@ -508,7 +764,7 @@ def main() -> None:
         save_strategy="steps",
         report_to=["wandb"] if wandb_enabled else [],
         run_name=wandb_run_name,
-        num_generations=int(cfg["rollout"]["k"]),
+        num_generations=num_generations,
         # Keep eval cheap and avoid divisibility constraints on small world sizes.
         num_generations_eval=1,
         max_completion_length=int(cfg["rollout"]["max_new_tokens"]),
@@ -520,8 +776,7 @@ def main() -> None:
         # Helpful debugging: print a few completions periodically so we can see formatting issues.
         log_completions=bool(cfg.get("train", {}).get("debug_rollouts", {}).get("enabled", False)),
         num_completions_to_print=int(cfg.get("train", {}).get("debug_rollouts", {}).get("max_prompts", 4)),
-        # Ensure the auxiliary format metric does not affect training reward.
-        reward_weights=[1.0, 0.0],
+        reward_weights=reward_weights,
     )
 
     trainer = GRPOTrainer(

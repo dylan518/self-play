@@ -1,0 +1,170 @@
+{
+  "metadata": {
+    "source": "examples.json",
+    "model": "gemini-3.1-flash-lite-preview",
+    "dotenv_path": ".env",
+    "seed": 1234,
+    "count": 30,
+    "target_count": 30,
+    "examples_per_prompt": 5,
+    "constraints": [
+      "sample small rotating subsets from pre-existing bank as inspiration",
+      "make each question structurally different from sampled examples",
+      "do not request or provide category labels",
+      "Qwen-class models should be able to solve",
+      "easy to verify with Python"
+    ]
+  },
+  "tasks_extended": [
+    {
+      "question": "Identify all four-digit integers where the number is equal to the sum of the cubes of its digits, and verify each by summing the cubes of their individual digits in a Python list comprehension.",
+      "verification": "Iterate from 1000 to 9999, convert each to a string or extract digits via modulo/division, cube each digit, sum them, and compare the result to the original number.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algorithm design, calculus, or creative writing to an exhaustive search over a discrete numeric domain with a distinct search constraint."
+    },
+    {
+      "question": "Determine the exact number of squares of any size (1x1, 2x2, etc.) that can be found within an 8x8 grid. Provide the sum of these counts for all possible square dimensions.",
+      "verification": "Use a Python loop: sum( (8-k+1)**2 for k in range(1, 9) ) and check against the result provided.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algebraic/linguistic sequences to a combinatorial geometry problem involving summation of discrete squares."
+    },
+    {
+      "question": "Find a 3x3 magic square of distinct prime numbers such that the sum of each row, column, and main diagonal is the same prime number. Provide the smallest such grid by row-major order.",
+      "verification": "Python: Iterate through prime combinations to check row/column/diagonal sums for equality and verify all numbers are distinct and prime.",
+      "confirm": "different_from_samples=yes; why=The task involves combinatorial search over number-theoretic properties rather than calculus, code debugging, or string manipulation."
+    },
+    {
+      "question": "Identify all base-10 integers between 100 and 999 that are equal to the sum of their digits raised to the power of the number of digits in the integer. Provide the set of these numbers.",
+      "verification": "Iterate through range(100, 1000), calculate sum(int(d)**3 for d in str(n)), compare with n, and verify the resulting list.",
+      "confirm": "different_from_samples=yes; why=The task shifts from linguistic puzzles, algorithms, or calculus to a discrete search for specific numeric properties (Armstrong numbers) requiring an exhaustive iterative check."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the decimal representation of 1/n has a period length of exactly 6.",
+      "verification": "Python: Iterate n from 7 upwards, step 7; compute the multiplicative order of 10 modulo n/gcd(n, 10^k) to check period length.",
+      "confirm": "different_from_samples=yes; why=The task shifts from logical/algebraic evaluation to number theoretic properties of modular arithmetic cycles, avoiding truth tables, code execution states, calculus, or knapsack optimization."
+    },
+    {
+      "question": "Construct a sequence of five distinct integers {a, b, c, d, e} such that the sum of every pair of elements is a perfect square. Your result should be a list of five integers.",
+      "verification": "Verify that all elements are distinct and that for all i, j where i != j, (list[i] + list[j]) is a perfect square using a simple loop and math.isqrt.",
+      "confirm": "different_from_samples=yes; why=The task shifts from string processing, algebra simplification, or estimation to a constrained combinatorial number theory search problem."
+    },
+    {
+      "question": "Identify the smallest positive integer $n$ such that $n!$ contains exactly three trailing zeros in its decimal representation.",
+      "verification": "Python: Iterate integers starting from 1, calculate the factorial, convert to string, and check the count of trailing zeros using regex or string stripping until the condition is met.",
+      "confirm": "different_from_samples=yes; why=The task requires solving a number-theoretic constraint involving base-10 digit properties rather than symbolic manipulation, string transformation, or algorithm optimization."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n! is divisible by the sum of all prime numbers less than 20, where n > 1.",
+      "verification": "Calculate the sum of primes less than 20. Then, iteratively check values of n starting from 2 until math.factorial(n) % sum_primes == 0.",
+      "confirm": "different_from_samples=yes; why=The question involves number theory properties and factorial growth rather than optimization, linguistics, recurrence, or poetry."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n! contains exactly 31 trailing zeros in decimal representation.",
+      "verification": "Use the Legendre's Formula for the exponent of a prime in n! to check values of n; specifically, compute floor(n/5) + floor(n/25) + floor(n/125)... and find the first n where this sum equals 31.",
+      "confirm": "different_from_samples=yes; why=The question involves number theory and factorial prime factorization rather than algebraic manipulation, code execution, or symbolic calculus."
+    },
+    {
+      "question": "A grid of size 5x5 contains a snake path that visits every cell exactly once. If the path starts at (0,0) and ends at (4,4), what is the parity of the number of steps taken, and is it possible for the snake to move only horizontally or vertically to adjacent cells if the path length is restricted to exactly 24 moves?",
+      "verification": "Define the grid as a graph, calculate the number of edges for a Hamiltonian path in a 5x5 grid, and check if the total steps (N-1) match the parity requirement.",
+      "confirm": "different_from_samples=yes; why=The problem involves graph theory and parity constraints rather than algebra, string manipulation, or common algorithmic patterns like dynamic programming."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n! contains exactly 10 trailing zeros.",
+      "verification": "Calculate the trailing zeros of n! using the formula sum(n // 5^k for k in 1..log5(n)) and verify equality to 10 for the found n, while ensuring n-1 does not result in 10.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algorithm design, refactoring, or equation manipulation to solving a number-theoretic constraint involving factorial properties."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n is divisible by all integers from 1 to 10 inclusive, but is not divisible by 11.",
+      "verification": "Calculate the least common multiple (LCM) of integers 1 through 10 using math.lcm and verify the result is not divisible by 11.",
+      "confirm": "different_from_samples=yes; why=The task shifts from symbolic algebra/logic/code-state to a number theoretic property involving divisibility rules and LCM."
+    },
+    {
+      "question": "Find all four-digit numbers such that the sum of the digits is equal to the product of the digits, and the digits are strictly increasing.",
+      "verification": "Iterate through all combinations of 4 distinct digits from 1-9 in increasing order, calculate their sum and product, and check for equality.",
+      "confirm": "different_from_samples=yes; why=The task shifts from code refactoring, logic puzzles, or algebra to a constrained combinatorial search over a discrete numeric space."
+    },
+    {
+      "question": "Identify the smallest positive integer n such that n is not a prime number, the sum of its divisors is a power of 2, and the product of its digits is exactly 12.",
+      "verification": "Python: Iterate from 1 to 100000; for each n, verify the sum of divisors function (sympy.divisor_sigma), check if n is composite, and confirm the product of digits equals 12.",
+      "confirm": "different_from_samples=yes; why=The task combines number theory properties with a digit-based constraint rather than linguistic composition or symbolic algebra."
+    },
+    {
+      "question": "Find the lexicographically smallest string of length 6 consisting only of the characters 'A', 'B', and 'C' that contains no repeating adjacent characters (i.e., no character is the same as the one immediately preceding it) and starts with 'C'.",
+      "verification": "Generate all possible strings of length 6 with 'A', 'B', 'C', filter for those satisfying the adjacent non-repeating constraint and the prefix constraint, then return the minimum string using standard lexicographical comparison.",
+      "confirm": "different_from_samples=yes; why=The task shifts from logical/algebraic problem solving to a constraint-based combinatorial search over a discrete string space."
+    },
+    {
+      "question": "Construct a string of length 12 consisting only of 'A' and 'B' such that the substring 'ABA' appears exactly four times, including overlapping occurrences. If multiple exist, provide the lexicographically smallest one.",
+      "verification": "Verify the count of 'ABA' using string.count() with a lookahead or custom sliding window function, and ensure lexicographical minimality by comparing against all valid combinations generated via product('AB', repeat=12).",
+      "confirm": "different_from_samples=yes; why=The task shifts from graph/logic/code-refactoring to constrained combinatorial string construction verified by exhaustive enumeration rather than runtime/graph logic."
+    },
+    {
+      "question": "Find the smallest positive integer n such that the number of divisors of n is exactly 12 and n is a multiple of 10.",
+      "verification": "Use a Python script to iterate through integers starting from 10, calculate the number of divisors for each, and check if it is divisible by 10 and if the divisor count is 12.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algebraic/logical transformation to a number-theoretic search constraint, moving away from closed-form derivation or logical puzzles."
+    },
+    {
+      "question": "Find the smallest positive integer $n$ such that $n$ is a multiple of 17, and the sum of the digits of $n$ is 25, while $n$ itself is less than 500.",
+      "verification": "Python: Iterate through multiples of 17 less than 500. Check if the sum of digits of the number equals 25. Return the smallest.",
+      "confirm": "different_from_samples=yes; why=The task uses number-theoretic search rather than geography, combinatorics, calculus, coding, or symbolic simplification."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n is divisible by 7 and the sum of its base-10 digits is exactly 35.",
+      "verification": "Python: Iterate starting from 7, incrementing by 7. For each number, convert to string, sum the integer value of digits, and check if it equals 35. Return the first match.",
+      "confirm": "different_from_samples=yes; why=The task shifts from linguistic/algorithmic generation to a constrained number theory search problem with a specific parity and digit-sum property, avoiding recurrence, regex, or poetic constraints."
+    },
+    {
+      "question": "Find the smallest positive integer n such that the sum of the digits of n is 20 and the product of the digits of n is 144.",
+      "verification": "Use a Python script to iterate through integers starting from 1, calculating digit sums and products until a match is found.",
+      "confirm": "different_from_samples=yes; why=The task involves digit-based constraint satisfaction rather than geometry, graph theory, or algorithm implementation."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n! contains exactly 300 trailing zeros in base 10.",
+      "verification": "Calculate the number of trailing zeros using Legendre's Formula (sum of floor(n/5^k)) and binary search for the smallest n that yields 300.",
+      "confirm": "different_from_samples=yes; why=The previous examples focused on algebra, calculus, logic, and riddles, whereas this problem requires number theory application and algorithmic verification."
+    },
+    {
+      "question": "Identify the smallest positive integer n such that n is divisible by the sum of its own digits, where the sum of the digits is exactly 13 and n is a multiple of 7.",
+      "verification": "Iterate through integers n starting from 1, filter for those where sum(digits) == 13 and n % 7 == 0, then check if n % sum(digits) == 0.",
+      "confirm": "different_from_samples=yes; why=The task shifts from symbolic calculus/logic puzzles to a discrete number theory search requiring programmatic constraint satisfaction over digit properties."
+    },
+    {
+      "question": "Construct a list of all four-letter English palindromes that contain exactly two distinct vowels, where the vowels must be 'a' and 'e'.",
+      "verification": "Python: Use the NLTK corpus or a standard word list to filter words of length 4, verify palindrome status, check that the set of vowels is {'a', 'e'}, and check for length equality.",
+      "confirm": "different_from_samples=yes; why=The task shifts from code execution, math, or algorithm design to linguistic constraint satisfaction using specific set-theory logic."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n! contains exactly 30 trailing zeros.",
+      "verification": "Calculate the trailing zeros of n! using Legendre's Formula (sum of floor(n/5^k)) and check the smallest n satisfying the result.",
+      "confirm": "different_from_samples=yes; why=The task requires a discrete number-theoretic calculation involving factorial properties rather than geometry, linguistics, or calculus-based algebra."
+    },
+    {
+      "question": "Determine the number of distinct permutations of the string 'BOOKKEEPER' that do not contain the substring 'OO'.",
+      "verification": "Generate all unique permutations of the multiset of characters and count those where the pattern 'OO' is absent using a string check.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algebraic derivation, logic puzzles, or algorithmic implementation to a combinatorial counting problem involving constrained string permutations."
+    },
+    {
+      "question": "Identify the smallest positive integer n such that n! contains exactly 300 trailing zeros in base 10.",
+      "verification": "Calculate the trailing zeros for a given n using the formula sum(n // 5^k) and use binary search to find n where the count equals 300.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algebraic derivation, string manipulation, or optimization to number theory (Legendre's formula/factorial properties) involving non-linear inverse search."
+    },
+    {
+      "question": "Find the smallest positive integer $n$ such that the decimal representation of $n!$ ends in exactly 124 zeroes.",
+      "verification": "Use a Python script to iterate through multiples of 5, calculating the count of factors of 5 in $n!$ using Legendre's Formula until the count equals 124.",
+      "confirm": "different_from_samples=yes; why=The task shifts from symbolic manipulation or creative constraint satisfaction to a discrete number-theoretic search problem involving factorial trailing zeroes."
+    },
+    {
+      "question": "Identify the sequence of all 4-letter English words that can be formed using only the letters in the string 'DOGMA', where each letter can be used at most once per word. List these words in alphabetical order.",
+      "verification": "Python: Define the source letters, use itertools.permutations to generate all 4-letter combinations, filter by a standard English dictionary set, and sort the result.",
+      "confirm": "different_from_samples=yes; why=The task shifts from algebraic/geographic/logical reasoning to combinatorics and linguistic validation using restricted character sets."
+    },
+    {
+      "question": "Identify all integers n in the range [1, 1000] such that the sum of the cubes of the digits of n equals n itself (narcissistic numbers). List them in ascending order.",
+      "verification": "Iterate through integers 1 to 1000, convert each to string, extract digits, calculate the sum of cubes, and compare to the original integer.",
+      "confirm": "different_from_samples=yes; why=The task shifts from symbolic calculus, logic puzzles, algorithm implementation, code state tracing, or sequence generation to a specific property-based search over a finite numeric domain."
+    },
+    {
+      "question": "Find the smallest positive integer n such that n is divisible by every integer from 1 to 10, and the sum of the digits of n is exactly 27.",
+      "verification": "Calculate the least common multiple of integers 1-10 (which is 2520), then check multiples of 2520 (2520 * k) until a number with digit sum 27 is found.",
+      "confirm": "different_from_samples=yes; why=The task shifts from optimization, string manipulation, or calculus to a constrained number-theoretic search that is discrete and finite."
+    }
+  ]
+}

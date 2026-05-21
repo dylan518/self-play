@@ -47,6 +47,7 @@ class QuestionBankExample:
     task: str
     question: str
     verification: str
+    confirm: str = ""
 
 
 def load_question_bank(path: str | Path) -> list[QuestionBankExample]:
@@ -95,6 +96,7 @@ def load_recent_generated_questions(
                 task="avoid_repeat",
                 question=question,
                 verification="Avoid repeating this topic, surface form, or answer pattern.",
+                confirm="different_from_samples=no; why=this is a recent generated question to move away from.",
             )
         )
     return examples[-max_examples:]
@@ -114,6 +116,7 @@ def _parse_rows(rows: Iterable[Any], *, category: str) -> list[QuestionBankExamp
                 task=str(row.get("task", "")).strip(),
                 question=question,
                 verification=str(row.get("verification", "")).strip(),
+                confirm=str(row.get("confirm", "")).strip(),
             )
         )
     return parsed
@@ -157,11 +160,13 @@ def render_question_bank_block(
         "Generate something novel and meaningfully different from these examples.",
     ]
     for idx, ex in enumerate([*recent_examples, *examples], start=1):
-        lines.append(
-            f"{idx}.\n"
-            f"QUESTION: {ex.question}\n"
-            f"VERIFICATION IDEA: {ex.verification}"
-        )
+        payload = {
+            "question": ex.question,
+            "verification": ex.verification,
+        }
+        if ex.confirm:
+            payload["confirm"] = ex.confirm
+        lines.append(f"{idx}. {json.dumps(payload, ensure_ascii=False)}")
     return "\n".join(lines)
 
 

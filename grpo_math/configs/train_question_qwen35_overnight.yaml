@@ -1,0 +1,105 @@
+seed: 4321
+
+model:
+  name_or_path: "Qwen/Qwen3.5-9B"
+  torch_dtype: "bfloat16"
+  use_flash_attn: true
+
+data:
+  source: "question_generation"
+  question_bank_path: "examples_gemini31flashlite_preview_nocategory_30.json"
+  num_examples: 8
+  question_bank_seed: 4321
+  compatible_only: false
+  num_prompts: 32
+  num_eval_prompts: 4
+  split_train: "train"
+  split_eval: "eval"
+  eval_fraction: 0.0
+
+prompt:
+  template_path: "grpo_math/prompts/question_generator_prompt.txt"
+
+reward:
+  mode: "question"
+  question_weight: 1.0
+  question_format_weight: 0.1
+  question:
+    lambda_verifiability: 0.35
+    confirm_soft_reward: 0.2
+    num_solutions_per_question: 4
+    judge_repeats_per_question: 2
+    solver_prompt_template: |
+      Question:
+      {question}
+
+      Put the final answer first. Your first line must be exactly:
+      FINAL_ANSWER: <integer>
+      Then include a concise check if useful. Do not write more than 6 lines total.
+    solver:
+      api_model: "Qwen/Qwen3.5-9B"
+      api_tokenizer_name_or_path: "Qwen/Qwen3.5-9B"
+      api_base_url: "http://127.0.0.1:8001/v1"
+      api_key: "EMPTY"
+      api_max_tokens_param: "max_tokens"
+      api_extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
+          thinking_budget: 256
+      include_reasoning_in_output: false
+      api_final_max_tokens: 64
+      api_final_prefill: "FINAL_ANSWER: "
+      api_timeout_s: 180
+      api_max_retries: 4
+      api_backoff_initial_s: 0.5
+      api_max_parallel: 8
+      temperature: 1.2
+      top_p: 0.98
+      max_new_tokens: 1024
+    judge:
+      verify_prompt_template_path: "grpo_math/prompts/single_solution_verify_prompt.txt"
+      api_model: "Qwen/Qwen3.5-9B"
+      api_base_url: "http://127.0.0.1:8001/v1"
+      api_key: "EMPTY"
+      api_max_tokens_param: "max_tokens"
+      api_extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+      api_timeout_s: 180
+      api_max_retries: 4
+      api_backoff_initial_s: 0.5
+      api_max_parallel: 8
+      temperature: 0.0
+      top_p: 1.0
+      max_new_tokens: 256
+
+rollout:
+  k: 4
+  temperature: 1.1
+  top_p: 0.95
+  max_new_tokens: 512
+
+train:
+  output_dir: "outputs/trl_grpo_question_qwen35_overnight"
+  steps: 5
+  prompts_per_step: 8
+  grad_accum_steps: 1
+  lora:
+    enabled: true
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    bias: "none"
+    target_modules: "all-linear"
+  lr: 1.0e-5
+  warmup_steps: 0
+  kl_beta: 0.01
+  gradient_checkpointing: true
+  eval_every: 0
+  save_every: 5
+  wandb:
+    enabled: false
+    project: "grpo-math"
+    run_name: "trl-grpo-question-qwen35-overnight"
+  debug_rollouts:
+    enabled: false

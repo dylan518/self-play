@@ -58,6 +58,32 @@ def extract_final_answer_int_strict(model_text: str) -> Optional[int]:
         return None
 
 
+def canonicalize_final_answer_text(model_text: str) -> Optional[str]:
+    """
+    Return text truncated at the first valid `FINAL_ANSWER: <int>` occurrence.
+
+    This keeps any reasoning before the answer for verifier context, but treats
+    the answer line as a hard boundary so rambling after the answer is not
+    presented to judges or downstream training data.
+    """
+    m = _FINAL_ANSWER_RE.search(model_text)
+    if m is None:
+        return None
+    prefix = model_text[: m.start()].rstrip()
+    answer_line = f"FINAL_ANSWER: {int(m.group(1))}"
+    if not prefix:
+        return answer_line
+    return f"{prefix}\n{answer_line}"
+
+
+def final_answer_tail_char_count(model_text: str) -> Optional[int]:
+    """Number of non-whitespace characters after the first valid final answer."""
+    m = _FINAL_ANSWER_RE.search(model_text)
+    if m is None:
+        return None
+    return len(model_text[m.end() :].strip())
+
+
 def binary_reward(model_text: str, gsm8k_answer_text: str) -> Tuple[float, Optional[int], Optional[int]]:
     # Reward should be *strict*: only grant reward if the model followed the required
     # `FINAL_ANSWER: <int>` format, otherwise the policy can get credit from any

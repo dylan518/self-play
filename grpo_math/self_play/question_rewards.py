@@ -12,15 +12,14 @@ Hard contracts (per ``LOCAL_SETUP_AGENT_PLAN.md`` Agent 1):
   stay in the proposer GRPO group as zero-reward samples (which gives the
   proposer a learning signal to stop emitting unusable questions).
 
-For accepted questions, the reward rewards mixed verdicts (questions that the
-solver finds genuinely interesting) and -- optionally -- judgeability and a
-filter-supplied usefulness score, multiplicatively, following the design in
-``VERDICT_RL_DESIGN.md``::
+For accepted questions, the default reward is the difficulty/verifiability
+mixture:
 
-    proposer_reward(q) = filter_score(q) * verdict_variance(q) * judgeability(q)
+    D = 1 - 2 * abs(p - 0.5)
+    r_q = (1 - lambda) * D + lambda * V
 
-We expose individual weights so the loop can toggle terms on/off without
-touching the math.
+where ``p`` is the solver correctness probability and ``V`` is a verifiability
+score in ``[0, 1]``.
 """
 
 from __future__ import annotations
@@ -57,6 +56,10 @@ class QuestionRewardBreakdown:
     trainable_for_proposer: bool
     note: str
     verdict_counts: Dict[str, int]
+    solver_correctness_probability: float = 0.0
+    difficulty_balance: float = 0.0
+    verifiability: float = 0.0
+    lambda_verifiability: float = 0.35
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -75,11 +78,28 @@ def _verdict_variance(n_correct: int, n_incorrect: int) -> float:
     return 4.0 * p * (1.0 - p)
 
 
-def _judgeability(n_total: int, n_unclear: int) -> float:
-    """Fraction of completions that received a non-unclear verdict."""
+def _judgeability(n_total: int, n_unscored: int) -> float:
+    """Fraction of completions that received a scored verdict."""
     if n_total <= 0:
         return 0.0
-    return max(0.0, min(1.0, 1.0 - (n_unclear / n_total)))
+    return max(0.0, min(1.0, 1.0 - (n_unscored / n_total)))
+
+
+def _difficulty_balance(p_correct: float) -> float:
+    p = max(0.0, min(1.0, float(p_correct)))
+    return max(0.0, min(1.0, 1.0 - 2.0 * abs(p - 0.5)))
+
+
+def compute_difficulty_verifiability_reward(
+    *,
+    p_correct: float,
+    verifiability: float,
+    lambda_verifiability: float = 0.35,
+) -> float:
+    lam = max(0.0, min(1.0, float(lambda_verifiability)))
+    v = max(0.0, min(1.0, float(verifiability)))
+    d = _difficulty_balance(p_correct)
+    return max(0.0, min(1.0, (1.0 - lam) * d + lam * v))
 
 
 def compute_question_reward(
@@ -90,6 +110,8 @@ def compute_question_reward(
     filter_score: float = 1.0,
     weight_variance: float = 1.0,
     weight_judgeability: float = 0.0,
+    lambda_verifiability: float = 0.35,
+    verifiability: float | None = None,
     train_filtered_for_proposer: bool = True,
 ) -> QuestionRewardBreakdown:
     """Compute a proposer/question reward.
@@ -105,10 +127,10 @@ def compute_question_reward(
             to learn that emitting near-copies is fine.
         filter_score: Optional ``[0.0, 1.0]`` usefulness score from the
             question filter. Multiplied into the reward.
-        weight_variance: Exponent / weight on the verdict-variance term. Set
-            to 0 to ignore variance.
-        weight_judgeability: Exponent / weight on the judgeability term. Off
-            (0.0) by default in the minimum viable loop.
+        weight_variance: Deprecated compatibility argument. The scalar reward
+            is always computed with the difficulty/verifiability formula.
+        weight_judgeability: Deprecated compatibility argument. The scalar
+            reward is always computed with the difficulty/verifiability formula.
         train_filtered_for_proposer: Should filtered-out questions remain in
             the proposer GRPO group as zero-reward samples? Default True (per
             spec): including them lets the proposer learn to stop generating
@@ -137,6 +159,7 @@ def compute_question_reward(
                 VERDICT_INVALID: 0,
                 VERDICT_UNCLEAR: 0,
             },
+            lambda_verifiability=float(lambda_verifiability),
         )
 
     counts = verdict_distribution(verdicts or [])
@@ -147,7 +170,11 @@ def compute_question_reward(
     n_total = n_correct + n_incorrect + n_invalid + n_unclear
 
     variance = _verdict_variance(n_correct, n_incorrect)
-    judgeability = _judgeability(n_total, n_unclear)
+    judgeability = _judgeability(n_total, n_invalid + n_unclear)
+    n_scored = n_correct + n_incorrect
+    p_correct = n_correct / n_scored if n_scored > 0 else 0.0
+    difficulty_balance = _difficulty_balance(p_correct)
+    verifiability_score = judgeability if verifiability is None else max(0.0, min(1.0, float(verifiability)))
 
     if duplicate:
         return QuestionRewardBreakdown(
@@ -160,15 +187,19 @@ def compute_question_reward(
             trainable_for_proposer=True,
             note="duplicate",
             verdict_counts=counts,
+            solver_correctness_probability=p_correct,
+            difficulty_balance=difficulty_balance,
+            verifiability=verifiability_score,
+            lambda_verifiability=float(lambda_verifiability),
         )
 
-    raw = filter_score
-    if weight_variance != 0.0:
-        raw = raw * (variance ** float(weight_variance))
-    if weight_judgeability != 0.0:
-        raw = raw * (judgeability ** float(weight_judgeability))
-
-    reward = max(0.0, float(raw))
+    del weight_variance, weight_judgeability
+    reward = compute_difficulty_verifiability_reward(
+        p_correct=p_correct,
+        verifiability=verifiability_score,
+        lambda_verifiability=lambda_verifiability,
+    )
+    reward *= max(0.0, min(1.0, float(filter_score)))
 
     if n_total == 0:
         note = "accepted_no_verdicts"
@@ -191,6 +222,10 @@ def compute_question_reward(
         trainable_for_proposer=True,
         note=note,
         verdict_counts=counts,
+        solver_correctness_probability=p_correct,
+        difficulty_balance=difficulty_balance,
+        verifiability=verifiability_score,
+        lambda_verifiability=float(lambda_verifiability),
     )
 
 
@@ -218,6 +253,7 @@ def score_questions(
     *,
     weight_variance: float = 1.0,
     weight_judgeability: float = 0.0,
+    lambda_verifiability: float = 0.35,
     train_filtered_for_proposer: bool = True,
 ) -> List[QuestionRewardBreakdown]:
     """Convenience: score a list of question records.
@@ -238,6 +274,8 @@ def score_questions(
                 filter_score=float(q.get("filter_score", 1.0)),
                 weight_variance=weight_variance,
                 weight_judgeability=weight_judgeability,
+                lambda_verifiability=lambda_verifiability,
+                verifiability=q.get("verifiability"),
                 train_filtered_for_proposer=train_filtered_for_proposer,
             )
         )
@@ -246,6 +284,7 @@ def score_questions(
 
 __all__ = [
     "QuestionRewardBreakdown",
+    "compute_difficulty_verifiability_reward",
     "compute_question_reward",
     "compute_proposer_group_advantages",
     "score_questions",

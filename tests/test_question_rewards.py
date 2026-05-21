@@ -6,6 +6,7 @@ import unittest
 
 from grpo_math.self_play.question_rewards import (
     QuestionRewardBreakdown,
+    compute_difficulty_verifiability_reward,
     compute_proposer_group_advantages,
     compute_question_reward,
     score_questions,
@@ -60,6 +61,55 @@ class TestRejectedQuestions(unittest.TestCase):
 
 
 class TestAcceptedQuestions(unittest.TestCase):
+    def test_difficulty_balance_formula_peaks_at_half_correct(self) -> None:
+        self.assertEqual(
+            compute_difficulty_verifiability_reward(
+                p_correct=0.5,
+                verifiability=0.0,
+                lambda_verifiability=0.0,
+            ),
+            1.0,
+        )
+        self.assertEqual(
+            compute_difficulty_verifiability_reward(
+                p_correct=0.0,
+                verifiability=0.0,
+                lambda_verifiability=0.0,
+            ),
+            0.0,
+        )
+        self.assertEqual(
+            compute_difficulty_verifiability_reward(
+                p_correct=1.0,
+                verifiability=0.0,
+                lambda_verifiability=0.0,
+            ),
+            0.0,
+        )
+
+    def test_question_reward_mixes_difficulty_and_verifiability(self) -> None:
+        b = compute_question_reward(
+            accepted=True,
+            verdicts=["CORRECT", "INCORRECT", "INCORRECT", "INCORRECT"],
+            verifiability=0.8,
+            lambda_verifiability=0.35,
+        )
+
+        self.assertAlmostEqual(b.solver_correctness_probability, 0.25)
+        self.assertAlmostEqual(b.difficulty_balance, 0.5)
+        self.assertAlmostEqual(b.verifiability, 0.8)
+        self.assertAlmostEqual(b.reward, 0.65 * 0.5 + 0.35 * 0.8)
+
+    def test_reward_is_clamped_to_unit_interval(self) -> None:
+        self.assertEqual(
+            compute_difficulty_verifiability_reward(
+                p_correct=-2.0,
+                verifiability=3.0,
+                lambda_verifiability=3.0,
+            ),
+            1.0,
+        )
+
     def test_mixed_verdicts_yield_positive_reward(self) -> None:
         b = compute_question_reward(
             accepted=True, verdicts=["CORRECT", "INCORRECT", "INCORRECT", "CORRECT"]
@@ -67,31 +117,32 @@ class TestAcceptedQuestions(unittest.TestCase):
         self.assertEqual(b.note, "mixed")
         self.assertEqual(b.verdict_variance, 1.0)  # 50/50 split
         self.assertEqual(b.judgeability, 1.0)  # no UNCLEAR
-        # default weights: variance only, filter_score=1
+        self.assertEqual(b.difficulty_balance, 1.0)
+        self.assertEqual(b.verifiability, 1.0)
         self.assertEqual(b.reward, 1.0)
         self.assertTrue(b.trainable_for_proposer)
         self.assertTrue(b.accepted)
 
-    def test_all_correct_collapses_to_zero_reward(self) -> None:
+    def test_all_correct_keeps_verifiability_reward(self) -> None:
         b = compute_question_reward(accepted=True, verdicts=["CORRECT", "CORRECT"])
         self.assertEqual(b.note, "all_correct")
         self.assertEqual(b.verdict_variance, 0.0)
-        self.assertEqual(b.reward, 0.0)
+        self.assertEqual(b.difficulty_balance, 0.0)
+        self.assertEqual(b.reward, 0.35)
         self.assertTrue(b.trainable_for_proposer)
 
-    def test_all_incorrect_collapses_to_zero_reward(self) -> None:
+    def test_all_incorrect_keeps_verifiability_reward(self) -> None:
         b = compute_question_reward(accepted=True, verdicts=["INCORRECT", "INCORRECT"])
         self.assertEqual(b.note, "all_incorrect")
         self.assertEqual(b.verdict_variance, 0.0)
-        self.assertEqual(b.reward, 0.0)
+        self.assertEqual(b.difficulty_balance, 0.0)
+        self.assertEqual(b.reward, 0.35)
         self.assertTrue(b.trainable_for_proposer)
 
     def test_all_invalid_collapses_to_zero_reward(self) -> None:
         b = compute_question_reward(accepted=True, verdicts=["INVALID", "INVALID"])
-        # No CORRECT/INCORRECT scoring -> variance 0, but judgeability is still 1
-        # (INVALID is not UNCLEAR).
         self.assertEqual(b.verdict_variance, 0.0)
-        self.assertEqual(b.judgeability, 1.0)
+        self.assertEqual(b.judgeability, 0.0)
         self.assertEqual(b.reward, 0.0)
         self.assertEqual(b.note, "all_unscored")
 
@@ -104,7 +155,7 @@ class TestAcceptedQuestions(unittest.TestCase):
 
     def test_judgeability_term(self) -> None:
         # Two CORRECT, two INCORRECT, one UNCLEAR -> judgeability = 4/5
-        # variance = 4 * 0.5 * 0.5 = 1.0
+        # p=0.5 -> difficulty=1.0; explicit legacy weights no longer change the formula.
         b = compute_question_reward(
             accepted=True,
             verdicts=["CORRECT", "INCORRECT", "CORRECT", "INCORRECT", "UNCLEAR"],
@@ -112,7 +163,7 @@ class TestAcceptedQuestions(unittest.TestCase):
         )
         self.assertAlmostEqual(b.verdict_variance, 1.0)
         self.assertAlmostEqual(b.judgeability, 4 / 5)
-        self.assertAlmostEqual(b.reward, 1.0 * 1.0 * (4 / 5))
+        self.assertAlmostEqual(b.reward, 0.65 * 1.0 + 0.35 * (4 / 5))
 
     def test_filter_score_multiplies_reward(self) -> None:
         b = compute_question_reward(
@@ -120,7 +171,7 @@ class TestAcceptedQuestions(unittest.TestCase):
             verdicts=["CORRECT", "INCORRECT"],
             filter_score=0.5,
         )
-        # variance = 1.0, filter_score = 0.5 -> 0.5
+        # filter_score remains a final gate on the new D/V reward.
         self.assertAlmostEqual(b.reward, 0.5)
         # Negative filter scores get clamped to 0.
         b2 = compute_question_reward(
@@ -151,7 +202,8 @@ class TestAcceptedQuestions(unittest.TestCase):
         self.assertEqual(b.verdict_counts[VERDICT_CORRECT], 1)
         # Only one scored completion -> p=1 -> variance=0
         self.assertEqual(b.verdict_variance, 0.0)
-        self.assertEqual(b.reward, 0.0)
+        self.assertEqual(b.difficulty_balance, 0.0)
+        self.assertAlmostEqual(b.reward, 0.35 * 0.25)
 
     def test_no_verdicts_is_accepted_no_verdicts(self) -> None:
         b = compute_question_reward(accepted=True, verdicts=[])
@@ -195,7 +247,7 @@ class TestScoreQuestions(unittest.TestCase):
         self.assertEqual(out[2].note, "all_correct")
         self.assertEqual(out[3].note, "duplicate")
         self.assertEqual(out[1].reward, 0.0)
-        self.assertEqual(out[2].reward, 0.0)
+        self.assertEqual(out[2].reward, 0.35)
         self.assertEqual(out[3].reward, 0.0)
         self.assertGreater(out[0].reward, 0.0)
 

@@ -1,0 +1,77 @@
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen3.5-9B"
+  torch_dtype: "bfloat16"
+  use_flash_attn: true
+
+data:
+  source: "pairwise_jsonl"
+  jsonl_path: "outputs/pairwise_rollouts_debug/samples_local4b_single_verify_loop_smoke.jsonl"
+  split_train: "train"
+  split_eval: "eval"
+  eval_fraction: 0.1
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    Put the final answer first. Your first line must be exactly:
+    FINAL_ANSWER: <integer>
+    Then include a concise check if useful. Do not write more than 6 lines total.
+
+reward:
+  mode: "verdict"
+  verdict_weight: 1.0
+  format_weight: 0.2
+  answer_boundary_weight: 0.1
+  format_lenient_final_answer: true
+  verdict_lenient_final_answer: true
+  teacher:
+    verify_prompt_template_path: "grpo_math/prompts/single_solution_verify_prompt.txt"
+    api_model: "Qwen/Qwen3.5-9B"
+    api_base_url: "http://127.0.0.1:8001/v1"
+    api_key: "EMPTY"
+    api_max_tokens_param: "max_tokens"
+    api_extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+    api_timeout_s: 120
+    api_max_retries: 4
+    api_backoff_initial_s: 0.5
+    temperature: 0.0
+    top_p: 1.0
+    max_new_tokens: 128
+
+rollout:
+  k: 4
+  temperature: 1.1
+  top_p: 0.98
+  max_new_tokens: 512
+
+train:
+  output_dir: "outputs/trl_grpo_pairwise_verdict_qwen35_9b_external_teacher_loop_smoke"
+  steps: 1
+  prompts_per_step: 4
+  grad_accum_steps: 1
+  lora:
+    enabled: true
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    bias: "none"
+    target_modules: "all-linear"
+  lr: 1.0e-5
+  warmup_steps: 0
+  kl_beta: 0.01
+  gradient_checkpointing: true
+  eval_every: 0
+  save_every: 1
+  wandb:
+    enabled: false
+    project: "grpo-math"
+    run_name: "trl-grpo-pairwise-verdict-qwen35-9b-external-teacher-loop-smoke"
+  debug_rollouts:
+    enabled: true
+    max_prompts: 4

@@ -2,9 +2,11 @@ import unittest
 
 from grpo_math.data.reward import (
     binary_reward,
+    canonicalize_final_answer_text,
     extract_final_answer_int,
     extract_final_answer_int_strict,
     extract_ground_truth_int,
+    final_answer_tail_char_count,
 )
 
 
@@ -31,6 +33,13 @@ class TestRewardParsing(unittest.TestCase):
         self.assertIsNone(extract_final_answer_int_strict("FINAL_ANSWER: 30.5"))
         # Allow some models to continue without inserting a newline
         self.assertEqual(extract_final_answer_int_strict("FINAL_ANSWER: 12Human: blah"), 12)
+
+    def test_canonicalize_final_answer_text_truncates_tail(self) -> None:
+        text = "work\nFINAL_ANSWER: 12\njunk after answer 999"
+        self.assertEqual(canonicalize_final_answer_text(text), "work\nFINAL_ANSWER: 12")
+        self.assertEqual(final_answer_tail_char_count(text), len("junk after answer 999"))
+        self.assertIsNone(canonicalize_final_answer_text("work only 12"))
+        self.assertIsNone(final_answer_tail_char_count("work only 12"))
 
     def test_binary_reward(self) -> None:
         r, pred, gt = binary_reward("FINAL_ANSWER: 5", "#### 5")

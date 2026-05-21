@@ -1,20 +1,14 @@
+Create one new self-contained math question inspired by the examples below.
 
-
-
-
-Target difficulty:
-- Make it difficult question that would you could solve about have the time
-- The question must also be verifiable with some python code or easy to check with the correct answer
+The question must have a single integer final answer.
 
 Do NOT provide the solution, answer, hints, or intermediate steps.
 
-Output exactly one line:
+Output exactly two lines:
 QUESTION: <question text>
+CONFIRM: different_from_samples=<yes/no>; integer_answer=<yes/no>; why=<short reason>
 
-here are 3 examples create a 4th
+Here are examples; create another question in the same broad style:
 
 {question_bank_examples}
-
-
-
 

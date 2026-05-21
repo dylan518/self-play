@@ -5,6 +5,12 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from grpo_math.self_play.generate_example_question_bank import (
+    _build_prompt,
+    _make_diversity_nonce,
+    _normalize_row,
+    _row_to_question_bank_example,
+)
 from grpo_math.self_play.question_bank import (
     is_current_loop_compatible,
     load_question_bank,
@@ -53,8 +59,9 @@ class TestQuestionBank(unittest.TestCase):
 
         self.assertIn("Question bank examples", block)
         self.assertIn("Generate something novel", block)
-        self.assertIn("VERIFICATION IDEA:", block)
-        self.assertEqual(block.count("QUESTION:"), 3)
+        self.assertIn('"question":', block)
+        self.assertIn('"verification":', block)
+        self.assertEqual(block.count('"question":'), 3)
         self.assertNotIn("Category:", block)
         self.assertNotIn("Task:", block)
 
@@ -83,6 +90,7 @@ class TestQuestionBank(unittest.TestCase):
         self.assertEqual(len(examples), 2)
         self.assertEqual(examples[0].category, "recent_generated")
         self.assertIn("Avoid repeating", examples[0].verification)
+        self.assertIn("different_from_samples=no", examples[0].confirm)
         self.assertNotIn("VERIFICATION IDEA", examples[1].question)
 
     def test_renders_from_config(self) -> None:
@@ -125,6 +133,73 @@ class TestQuestionBank(unittest.TestCase):
         self.assertIn("Avoid this old generated question", block)
         self.assertNotIn("Recent generated questions to avoid", block)
         self.assertNotIn("Original inspiration examples", block)
+
+    def test_generation_prompt_prioritizes_diversity(self) -> None:
+        selected = select_question_bank_examples(
+            load_question_bank("examples.json"), count=2, seed=3, compatible_only=False
+        )
+        recent = [
+            _row_to_question_bank_example(
+                {
+                    "question": "Find the smallest positive integer with a repeated digit pattern.",
+                    "verification": "Brute force over integers.",
+                }
+            )
+        ]
+
+        prompt = _build_prompt(selected, recent, diversity_nonce="abc123xy")
+
+        self.assertTrue(prompt.startswith("Diversity nonce: abc123xy"))
+        self.assertIn("infer the broad dataset goal", prompt)
+        self.assertIn("recent generated examples as things to move away from immediately", prompt)
+        self.assertIn("completely different from the examples below", prompt)
+        self.assertIn("Seed examples:", prompt)
+        self.assertIn("Recent generated examples:", prompt)
+        self.assertIn(
+            '{"question":"<question text>","verification":"<brief Python verification plan>",',
+            prompt,
+        )
+        self.assertIn('"confirm":"different_from_samples=<yes/no>; why=<short reason>"', prompt)
+        self.assertNotIn("Category:", prompt)
+
+    def test_active_question_prompt_requests_confirmation(self) -> None:
+        prompt = Path("grpo_math/prompts/question_generator_prompt.txt").read_text(encoding="utf-8")
+
+        self.assertIn("Output exactly two lines", prompt)
+        self.assertIn("CONFIRM: different_from_samples=<yes/no>", prompt)
+        self.assertIn("single integer final answer", prompt)
+
+    def test_normalizes_optional_generation_confirmation(self) -> None:
+        row = _normalize_row(
+            {
+                "question": "Find the smallest n divisible by 7.",
+                "verification": "Brute force in Python.",
+                "confirm": "different_from_samples=yes; why=uses a new divisibility pattern",
+            }
+        )
+
+        self.assertNotIn("category", row)
+        self.assertIn("different_from_samples=yes", row["confirm"])
+
+    def test_converts_generated_row_for_feedback_sampling(self) -> None:
+        example = _row_to_question_bank_example(
+            {
+                "question": "Count valid strings.",
+                "verification": "Brute force with itertools.product.",
+            }
+        )
+
+        self.assertEqual(example.category, "generated")
+        self.assertEqual(example.task, "generated_feedback")
+        self.assertEqual(example.question, "Count valid strings.")
+
+    def test_make_diversity_nonce(self) -> None:
+        import random
+
+        nonce = _make_diversity_nonce(random.Random(0), 8)
+
+        self.assertEqual(len(nonce), 8)
+        self.assertRegex(nonce, r"^[a-z0-9]+$")
 
 
 if __name__ == "__main__":
