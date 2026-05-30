@@ -1129,6 +1129,17 @@ def main() -> None:
         default=0,
         help="Add this offset to cycle numbering for output files and W&B cycle metrics.",
     )
+    ap.add_argument(
+        "--skip_rollout_if_jsonl_exists",
+        action="store_true",
+        help="Reuse cycle_*_samples.jsonl when present instead of regenerating rollouts.",
+    )
+    ap.add_argument(
+        "--question_prompts_per_step",
+        type=int,
+        default=None,
+        help="Override train.prompts_per_step in the question train config (e.g. 2 to reduce DPO VRAM).",
+    )
     args = ap.parse_args()
 
     root = _repo_root()
@@ -1225,7 +1236,17 @@ def main() -> None:
             rollout_cfg.setdefault("output", {})
             rollout_cfg["output"]["jsonl_path"] = str(rel_cycle_jsonl)
             rollout_cfg["output"]["write_mode"] = "overwrite"
-            if current_generator_model:
+            reuse_rollout = (
+                args.skip_rollout_if_jsonl_exists
+                and cycle_jsonl.is_file()
+                and cycle_jsonl.stat().st_size > 0
+            )
+            if reuse_rollout:
+                print(
+                    f"[loop] reusing existing rollout JSONL ({cycle_jsonl.stat().st_size} bytes): {cycle_jsonl}",
+                    flush=True,
+                )
+            if current_generator_model and not reuse_rollout:
                 rollout_cfg.setdefault("generator", {})
                 if _cfg_uses_openai_api(rollout_cfg["generator"]):
                     generator_lora_name = _safe_vllm_lora_name("generator", cycle_tag, current_generator_model)
@@ -1244,7 +1265,7 @@ def main() -> None:
                 else:
                     rollout_cfg["generator"]["model_name_or_path"] = current_generator_model
                     print(f"[loop] rollout generator model: {current_generator_model}", flush=True)
-            if current_solver_model:
+            if current_solver_model and not reuse_rollout:
                 rollout_cfg.setdefault("solver", {})
                 if _cfg_uses_openai_api(rollout_cfg["solver"]):
                     solver_lora_name = _safe_vllm_lora_name("solver", cycle_tag, current_solver_model)
@@ -1303,6 +1324,8 @@ def main() -> None:
                 rel_question_train_out = question_train_out.relative_to(root)
                 question_train_cfg.setdefault("train", {})
                 question_train_cfg["train"]["output_dir"] = str(rel_question_train_out)
+                if args.question_prompts_per_step is not None:
+                    question_train_cfg["train"]["prompts_per_step"] = int(args.question_prompts_per_step)
                 question_wandb_cfg = question_train_cfg["train"].setdefault("wandb", {})
                 base_question_run_name = str(question_wandb_cfg.get("run_name", "self-play-question-grpo"))
                 question_wandb_cfg["run_name"] = f"{base_question_run_name}-{tag}-{cycle_tag}"
@@ -1353,54 +1376,61 @@ def main() -> None:
                 elif args.stream_question_train:
                     question_train_proc, question_train_t0 = _start_async(question_train_cmd, cwd=root, env=env)
 
-            rollout_generate_s, rollout_generate_gpu = _run_timed_with_gpu_sampling(
-                [
-                    python,
-                    "-m",
-                    "grpo_math.self_play.generate_pairwise_data",
-                    "--config",
-                    str(rollout_cfg_path),
-                ],
-                cwd=root,
-                env=env,
-                gpu_indices=gpu_indices,
-                **(
-                    {
-                        "wandb_run": wandb_run,
-                        "heartbeat_prefix": "heartbeat/rollout_generate",
-                        "heartbeat_payload": {
-                            "loop/status": "rollout_generate_running",
-                            "rollout/cycle": cycle,
-                            "loop/cycle_index": cycle,
-                        },
-                        "heartbeat_every_s": 30.0,
-                        "progress_jsonl": cycle_jsonl,
-                    }
-                    if wandb_run is not None
-                    else {}
-                ),
-            )
+            rollout_generate_s = 0.0
+            rollout_generate_gpu: Dict[str, float] = {}
+            rollout_export_s = 0.0
+            if not reuse_rollout:
+                rollout_generate_s, rollout_generate_gpu = _run_timed_with_gpu_sampling(
+                    [
+                        python,
+                        "-m",
+                        "grpo_math.self_play.generate_pairwise_data",
+                        "--config",
+                        str(rollout_cfg_path),
+                    ],
+                    cwd=root,
+                    env=env,
+                    gpu_indices=gpu_indices,
+                    **(
+                        {
+                            "wandb_run": wandb_run,
+                            "heartbeat_prefix": "heartbeat/rollout_generate",
+                            "heartbeat_payload": {
+                                "loop/status": "rollout_generate_running",
+                                "rollout/cycle": cycle,
+                                "loop/cycle_index": cycle,
+                            },
+                            "heartbeat_every_s": 30.0,
+                            "progress_jsonl": cycle_jsonl,
+                        }
+                        if wandb_run is not None
+                        else {}
+                    ),
+                )
 
-            if wandb_run is not None:
-                _wandb_log(wandb_run, {"loop/status_code": 3, "loop/status": "rollout_generate_done", "rollout/cycle": cycle})
+                if wandb_run is not None:
+                    _wandb_log(
+                        wandb_run,
+                        {"loop/status_code": 3, "loop/status": "rollout_generate_done", "rollout/cycle": cycle},
+                    )
 
-            rollout_export_s = _run_timed(
-                [
-                    python,
-                    "-m",
-                    "grpo_math.self_play.export_rollout_readmes",
-                    "--jsonl",
-                    str(rel_cycle_jsonl),
-                    "--out_dir",
-                    "outputs/readme_exports",
-                    "--config",
-                    str(rollout_cfg_path),
-                ],
-                cwd=root,
-                env=env,
-            )
+                rollout_export_s = _run_timed(
+                    [
+                        python,
+                        "-m",
+                        "grpo_math.self_play.export_rollout_readmes",
+                        "--jsonl",
+                        str(rel_cycle_jsonl),
+                        "--out_dir",
+                        "outputs/readme_exports",
+                        "--config",
+                        str(rollout_cfg_path),
+                    ],
+                    cwd=root,
+                    env=env,
+                )
             md_dir = root / "outputs" / "readme_exports" / rel_cycle_jsonl.stem
-            if wandb_run is not None:
+            if wandb_run is not None and not reuse_rollout:
                 try:
                     import wandb
 

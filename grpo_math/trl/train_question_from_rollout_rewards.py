@@ -196,9 +196,11 @@ def main() -> None:
 
     model_cfg = cfg.get("model", {}) if isinstance(cfg.get("model"), dict) else {}
     from grpo_math.trl.train_grpo_trl import (
+        _ensure_dpo_policy_adapter_trainable,
         _load_adapter_model_if_needed,
         _maybe_build_lora_config,
         _torch_dtype,
+        _unwrap_trainer_model,
     )
 
     model_name = str(model_cfg["name_or_path"])
@@ -221,8 +223,11 @@ def main() -> None:
     tokenizer.padding_side = "left"
 
     peft_config = _maybe_build_lora_config(cfg)
+    use_gradient_checkpointing = bool(train_cfg.get("gradient_checkpointing", True))
     if loaded_adapter:
         peft_config = None
+        # Qwen3.5 linear-attn + loaded LoRA + DPO hits CheckpointError on step 0 if enabled.
+        use_gradient_checkpointing = False
 
     wandb_cfg = train_cfg.get("wandb", {}) if isinstance(train_cfg.get("wandb"), dict) else {}
     if bool(wandb_cfg.get("enabled", False)):
@@ -244,7 +249,7 @@ def main() -> None:
         "per_device_train_batch_size": per_device_bsz,
         "gradient_accumulation_steps": int(train_cfg.get("grad_accum_steps", 1)),
         "bf16": True if model_cfg.get("torch_dtype", "bfloat16") in ("bf16", "bfloat16") else False,
-        "gradient_checkpointing": bool(train_cfg.get("gradient_checkpointing", True)),
+        "gradient_checkpointing": use_gradient_checkpointing,
         "max_steps": int(args.max_steps) if args.max_steps is not None else int(train_cfg.get("steps", 25)),
         "logging_steps": int(train_cfg.get("log_every", 1)),
         "save_steps": int(train_cfg.get("save_every", 25)),
@@ -277,7 +282,11 @@ def main() -> None:
         processing_class=tokenizer,
         peft_config=peft_config,
     )
-    if peft_config is not None and hasattr(trainer.model, "print_trainable_parameters"):
+    dpo_trainable_diag: dict[str, Any] | None = None
+    if loaded_adapter:
+        dpo_trainable_diag = _ensure_dpo_policy_adapter_trainable(_unwrap_trainer_model(trainer))
+        print(json.dumps({"dpo_adapter_trainable": dpo_trainable_diag}, sort_keys=True), flush=True)
+    if hasattr(trainer.model, "print_trainable_parameters"):
         trainer.model.print_trainable_parameters()
 
     print(
@@ -288,6 +297,9 @@ def main() -> None:
                 "preference_pairs_eval": len(eval_pairs),
                 "eval_fraction": eval_fraction,
                 "output_dir": out_dir,
+                "loaded_adapter": loaded_adapter,
+                "gradient_checkpointing": use_gradient_checkpointing,
+                "dpo_adapter_trainable": dpo_trainable_diag,
             },
             sort_keys=True,
         ),

@@ -485,16 +485,21 @@ def _verify_adapter_weights_loaded(
 
     checked = 0
     matched = 0
+    skipped_no_model = 0
     mismatches: list[str] = []
     for suffix, file_tensor in file_by_suffix.items():
         file_norm = float(file_tensor.float().norm().cpu())
         if file_norm < 1e-8:
             continue
-        checked += 1
         model_param = model_by_suffix.get(suffix)
         if model_param is None:
+            # Qwen3.5 checkpoints may include vision-tower LoRA keys; text-only resume skips them.
+            if suffix.startswith("visual."):
+                skipped_no_model += 1
+                continue
             mismatches.append(f"no_param_for:{suffix}")
             continue
+        checked += 1
         model_norm = float(model_param.detach().float().cpu().norm())
         ratio = model_norm / file_norm
         if min_norm_ratio <= ratio <= max_norm_ratio:
@@ -507,6 +512,7 @@ def _verify_adapter_weights_loaded(
         "adapter_verify_ok": ok,
         "adapter_verify_checked": checked,
         "adapter_verify_matched": matched,
+        "adapter_verify_skipped_visual": skipped_no_model,
         "adapter_verify_mismatches": mismatches[:8],
     }
     print(json.dumps({"adapter_verify": summary}, sort_keys=True), flush=True)
@@ -577,6 +583,9 @@ def _load_adapter_model_if_needed(
             flush=True,
         )
         _verify_adapter_weights_loaded(adapter_model, path)
+        if is_trainable:
+            trainable_stats = _ensure_loaded_adapter_trainable(adapter_model)
+            print(json.dumps({"adapter_trainable": trainable_stats}, sort_keys=True), flush=True)
         return adapter_model, base_model_name, True
     except Exception as autopeft_exc:
         print(
@@ -616,7 +625,79 @@ def _load_adapter_model_if_needed(
             f"{stats['adapter_tensors_copied']}/{stats['adapter_keys_remapped']}"
         )
     _verify_adapter_weights_loaded(adapter_model, path)
+    if is_trainable:
+        trainable_stats = _ensure_loaded_adapter_trainable(adapter_model)
+        print(json.dumps({"adapter_trainable": trainable_stats}, sort_keys=True), flush=True)
     return adapter_model, base_model_name, True
+
+
+def _ensure_loaded_adapter_trainable(model: Any) -> dict[str, int]:
+    """AutoPeft loads adapters with frozen LoRA weights; unfreeze for continued training."""
+    model.train()
+    lora_tensors = 0
+    for _name, param in model.named_parameters():
+        if "lora_" in _name:
+            param.requires_grad = True
+            lora_tensors += 1
+    if lora_tensors == 0:
+        raise RuntimeError("Loaded adapter model has no LoRA parameters to train")
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    trainable = sum(
+        1 for name, param in model.named_parameters() if "lora_" in name and param.requires_grad
+    )
+    return {"lora_tensors": lora_tensors, "lora_tensors_requires_grad": trainable}
+
+
+def _unwrap_trainer_model(trainer: Any) -> Any:
+    model = trainer.model
+    if hasattr(trainer, "accelerator"):
+        model = trainer.accelerator.unwrap_model(trainer.model)
+    return model
+
+
+def _count_lora_trainable(model: Any, *, adapter: str = "default") -> dict[str, int]:
+    total_lora = 0
+    trainable = 0
+    for name, param in model.named_parameters():
+        if "lora_" not in name:
+            continue
+        if adapter == "default" and ".ref." in name:
+            continue
+        if adapter == "ref" and ".ref." not in name:
+            continue
+        total_lora += 1
+        if param.requires_grad:
+            trainable += 1
+    return {"lora_tensors": total_lora, "lora_tensors_requires_grad": trainable}
+
+
+def _ensure_dpo_policy_adapter_trainable(model: Any) -> dict[str, dict[str, int]]:
+    """
+    DPOTrainer clones the loaded adapter into a frozen ``ref`` adapter for reference logps.
+    Unfreeze only the policy (``default``) adapter after trainer construction.
+    """
+    model.train()
+    for name, param in model.named_parameters():
+        if "lora_" not in name:
+            continue
+        param.requires_grad = ".ref." not in name
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    if hasattr(model, "set_adapter"):
+        try:
+            model.set_adapter("default")
+        except Exception:
+            pass
+    default_stats = _count_lora_trainable(model, adapter="default")
+    if default_stats["lora_tensors"] == 0:
+        raise RuntimeError("DPO model has no default-adapter LoRA parameters to train")
+    if default_stats["lora_tensors_requires_grad"] == 0:
+        raise RuntimeError("DPO default-adapter LoRA parameters are still frozen after unfreeze")
+    return {
+        "default": default_stats,
+        "ref": _count_lora_trainable(model, adapter="ref"),
+    }
 
 
 def main() -> None:
