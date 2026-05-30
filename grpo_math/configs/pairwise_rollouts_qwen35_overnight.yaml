@@ -76,7 +76,7 @@ solver:
 
     Think through the solution, then when you begin the final response, put the answer first.
     The final response must start with this exact line:
-    FINAL_ANSWER: <final answer>
+    FINAL_ANSWER: <integer>
     After that line, you may include a brief check if needed.
   temperature: 1.0
   top_p: 0.95
@@ -108,12 +108,10 @@ judge:
   repeats_per_pair: 1
   repeats_per_solution: 3
   verify_sample_size: 3
-  temperature: 0.3
+  temperature: 1.4
   top_p: 0.95
   max_new_tokens: 1024
   batch_size: 1
-  python_assisted: true
-  python_timeout_s: 5
 
 output:
   include_judge_traces: true

@@ -129,6 +129,34 @@ def _build_train_command(
     raise ValueError(f"Unsupported train launcher: {launcher!r}")
 
 
+def _build_python_module_command(
+    *,
+    python: str,
+    module: str,
+    module_args: list[str],
+    launcher: str,
+    num_processes: int,
+) -> list[str]:
+    launcher = str(launcher).strip().lower()
+    num_processes = max(1, int(num_processes))
+    if launcher == "python" or num_processes == 1:
+        return [python, "-m", module, *module_args]
+    if launcher == "accelerate":
+        return [
+            python,
+            "-m",
+            "accelerate.commands.launch",
+            "--num_processes",
+            str(num_processes),
+            "--mixed_precision",
+            "bf16",
+            "-m",
+            module,
+            *module_args,
+        ]
+    raise ValueError(f"Unsupported train launcher: {launcher!r}")
+
+
 def _query_gpu_snapshot(indices: list[int] | None = None) -> Dict[int, Dict[str, float]]:
     """
     Returns keyed stats by GPU index:
@@ -993,7 +1021,15 @@ def main() -> None:
         "--train_config",
         type=str,
         default="grpo_math/configs/train_pairwise_verdict_llama31_8b_trl.yaml",
-        help="GRPO train config template.",
+        help="GRPO train config template (not required if --skip_solver_train).",
+    )
+    ap.add_argument(
+        "--skip_solver_train",
+        action="store_true",
+        help=(
+            "Only run rollouts (+ optional question_train_config). Do not train or "
+            "advance the solver checkpoint each cycle."
+        ),
     )
     ap.add_argument(
         "--question_train_config",
@@ -1103,7 +1139,11 @@ def main() -> None:
     )
     if not rollout_template_path.exists():
         raise FileNotFoundError(f"Rollout config not found: {rollout_template_path}")
-    if not train_template_path.exists():
+    if args.skip_solver_train:
+        if not str(args.question_train_config).strip():
+            raise ValueError("--skip_solver_train requires --question_train_config (question-only DPO/GRPO).")
+        print("[loop] solver training disabled; solver stays at rollout config / --initial_solver_model", flush=True)
+    elif not train_template_path.exists():
         raise FileNotFoundError(f"Train config not found: {train_template_path}")
     if question_train_template_path is not None and not question_train_template_path.exists():
         raise FileNotFoundError(f"Question train config not found: {question_train_template_path}")
@@ -1255,6 +1295,9 @@ def main() -> None:
                 if current_generator_model:
                     question_train_cfg.setdefault("model", {})
                     question_train_cfg["model"]["name_or_path"] = current_generator_model
+                question_train_data_cfg = question_train_cfg.setdefault("data", {})
+                question_train_source = str(question_train_data_cfg.get("source", "")).strip().lower()
+                question_train_uses_rollout_rewards = question_train_source == "rollout_rewards"
 
                 question_train_out = run_dir / f"{cycle_tag}_question_grpo"
                 rel_question_train_out = question_train_out.relative_to(root)
@@ -1275,13 +1318,21 @@ def main() -> None:
                 else:
                     question_wandb_cfg["enabled"] = False
 
+                if question_train_uses_rollout_rewards:
+                    question_train_data_cfg["jsonl_path"] = str(rel_cycle_jsonl)
                 question_train_cfg_path = cfg_dir / f"{cycle_tag}_question_train.yaml"
                 _dump_yaml(question_train_cfg_path, question_train_cfg)
-                question_train_cmd = _build_train_command(
+                question_train_module = (
+                    "grpo_math.trl.train_question_from_rollout_rewards"
+                    if question_train_uses_rollout_rewards
+                    else "grpo_math.trl.train_grpo_trl"
+                )
+                question_train_cmd = _build_python_module_command(
                     python=python,
+                    module=question_train_module,
                     launcher=args.train_launcher,
                     num_processes=args.train_num_processes,
-                    train_module_args=["--config", str(question_train_cfg_path)],
+                    module_args=["--config", str(question_train_cfg_path)],
                 )
                 if wandb_run is not None:
                     _wandb_log(
@@ -1293,7 +1344,13 @@ def main() -> None:
                             "question_train/streamed": bool(args.stream_question_train),
                         },
                     )
-                if args.stream_question_train:
+                if args.stream_question_train and question_train_uses_rollout_rewards:
+                    print(
+                        "[loop] --stream_question_train ignored for rollout_rewards question training; "
+                        "waiting for rollout JSONL.",
+                        flush=True,
+                    )
+                elif args.stream_question_train:
                     question_train_proc, question_train_t0 = _start_async(question_train_cmd, cwd=root, env=env)
 
             rollout_generate_s, rollout_generate_gpu = _run_timed_with_gpu_sampling(
@@ -1416,107 +1473,113 @@ def main() -> None:
                 else:
                     print("[loop] no question checkpoint found; next cycle keeps template generator", flush=True)
 
-            train_cfg = _load_yaml(train_template_path)
-            train_cfg.setdefault("data", {})
-            train_cfg["data"]["source"] = "pairwise_jsonl"
-            train_cfg["data"]["jsonl_path"] = str(rel_cycle_jsonl)
-            train_cfg["data"]["split_train"] = "train"
-            train_cfg["data"]["split_eval"] = "eval"
-            train_cfg["data"]["eval_fraction"] = float(train_cfg["data"].get("eval_fraction", 0.2))
-            train_cfg.setdefault("rollout", {})
-            solver_cfg = rollout_cfg.get("solver", {}) if isinstance(rollout_cfg, dict) else {}
-            solver_max_new_tokens = int(solver_cfg.get("max_new_tokens", 0) or 0)
-            inherit_solver_max_new_tokens = bool(train_cfg["rollout"].get("inherit_solver_max_new_tokens", False))
-            if inherit_solver_max_new_tokens and solver_max_new_tokens > 0:
-                train_cfg["rollout"]["max_new_tokens"] = solver_max_new_tokens
-            if args.use_rollout_strong_verifier_for_train:
-                strong_cfg = rollout_cfg.get("strong_verifier", {}) if isinstance(rollout_cfg, dict) else {}
-                if bool(strong_cfg.get("enabled", False)):
-                    train_cfg.setdefault("reward", {})
-                    train_cfg["reward"]["mode"] = "verdict"
-                    train_teacher_cfg = train_cfg["reward"].setdefault("teacher", {})
-                    provider = str(strong_cfg.get("provider", "")).strip().lower()
-                    if provider == "openai":
-                        train_teacher_cfg["api_base_url"] = str(strong_cfg.get("base_url", "https://api.openai.com/v1"))
-                        train_teacher_cfg["api_model"] = str(strong_cfg.get("model", "gpt-4.1"))
-                        train_teacher_cfg["api_timeout_s"] = float(strong_cfg.get("timeout_s", 120.0))
-                        train_teacher_cfg.setdefault("api_max_tokens_param", "max_completion_tokens")
-                    verify_path = str(rollout_cfg.get("judge", {}).get("verify_prompt_template_path", "")).strip()
-                    if verify_path:
-                        train_teacher_cfg["verify_prompt_template_path"] = verify_path
-                    print(
-                        f"[loop] train reward teacher sourced from rollout strong_verifier: "
-                        f"{train_teacher_cfg.get('api_model')} @ {train_teacher_cfg.get('api_base_url')}",
-                        flush=True,
-                    )
+            train_s = 0.0
+            train_gpu: Dict[str, float] = {}
+            cycle_train_out: Path | None = None
+            if not args.skip_solver_train:
+                train_cfg = _load_yaml(train_template_path)
+                train_cfg.setdefault("data", {})
+                train_cfg["data"]["source"] = "pairwise_jsonl"
+                train_cfg["data"]["jsonl_path"] = str(rel_cycle_jsonl)
+                train_cfg["data"]["split_train"] = "train"
+                train_cfg["data"]["split_eval"] = "eval"
+                train_cfg["data"]["eval_fraction"] = float(train_cfg["data"].get("eval_fraction", 0.2))
+                train_cfg.setdefault("rollout", {})
+                solver_cfg = rollout_cfg.get("solver", {}) if isinstance(rollout_cfg, dict) else {}
+                solver_max_new_tokens = int(solver_cfg.get("max_new_tokens", 0) or 0)
+                inherit_solver_max_new_tokens = bool(train_cfg["rollout"].get("inherit_solver_max_new_tokens", False))
+                if inherit_solver_max_new_tokens and solver_max_new_tokens > 0:
+                    train_cfg["rollout"]["max_new_tokens"] = solver_max_new_tokens
+                if args.use_rollout_strong_verifier_for_train:
+                    strong_cfg = rollout_cfg.get("strong_verifier", {}) if isinstance(rollout_cfg, dict) else {}
+                    if bool(strong_cfg.get("enabled", False)):
+                        train_cfg.setdefault("reward", {})
+                        train_cfg["reward"]["mode"] = "verdict"
+                        train_teacher_cfg = train_cfg["reward"].setdefault("teacher", {})
+                        provider = str(strong_cfg.get("provider", "")).strip().lower()
+                        if provider == "openai":
+                            train_teacher_cfg["api_base_url"] = str(strong_cfg.get("base_url", "https://api.openai.com/v1"))
+                            train_teacher_cfg["api_model"] = str(strong_cfg.get("model", "gpt-4.1"))
+                            train_teacher_cfg["api_timeout_s"] = float(strong_cfg.get("timeout_s", 120.0))
+                            train_teacher_cfg.setdefault("api_max_tokens_param", "max_completion_tokens")
+                        verify_path = str(rollout_cfg.get("judge", {}).get("verify_prompt_template_path", "")).strip()
+                        if verify_path:
+                            train_teacher_cfg["verify_prompt_template_path"] = verify_path
+                        print(
+                            f"[loop] train reward teacher sourced from rollout strong_verifier: "
+                            f"{train_teacher_cfg.get('api_model')} @ {train_teacher_cfg.get('api_base_url')}",
+                            flush=True,
+                        )
 
-            if current_solver_model:
-                train_cfg.setdefault("model", {})
-                train_cfg["model"]["name_or_path"] = current_solver_model
+                if current_solver_model:
+                    train_cfg.setdefault("model", {})
+                    train_cfg["model"]["name_or_path"] = current_solver_model
 
-            cycle_train_out = run_dir / f"{cycle_tag}_grpo"
-            rel_cycle_train_out = cycle_train_out.relative_to(root)
-            train_cfg.setdefault("train", {})
-            train_cfg["train"]["output_dir"] = str(rel_cycle_train_out)
-            wandb_cfg = train_cfg["train"].setdefault("wandb", {})
-            base_run_name = str(wandb_cfg.get("run_name", "self-play-grpo"))
-            wandb_cfg["run_name"] = f"{base_run_name}-{tag}-{cycle_tag}"
-            if args.separate_train_wandb:
-                wandb_cfg["enabled"] = True
-                wandb_cfg["group"] = wandb_group
-                base_tags = wandb_cfg.get("tags", [])
-                if not isinstance(base_tags, list):
-                    base_tags = [str(base_tags)] if base_tags else []
-                wandb_cfg["tags"] = list(dict.fromkeys([*base_tags, "self-play", "grpo", tag, cycle_tag]))
+                cycle_train_out = run_dir / f"{cycle_tag}_grpo"
+                rel_cycle_train_out = cycle_train_out.relative_to(root)
+                train_cfg.setdefault("train", {})
+                train_cfg["train"]["output_dir"] = str(rel_cycle_train_out)
+                wandb_cfg = train_cfg["train"].setdefault("wandb", {})
+                base_run_name = str(wandb_cfg.get("run_name", "self-play-grpo"))
+                wandb_cfg["run_name"] = f"{base_run_name}-{tag}-{cycle_tag}"
+                if args.separate_train_wandb:
+                    wandb_cfg["enabled"] = True
+                    wandb_cfg["group"] = wandb_group
+                    base_tags = wandb_cfg.get("tags", [])
+                    if not isinstance(base_tags, list):
+                        base_tags = [str(base_tags)] if base_tags else []
+                    wandb_cfg["tags"] = list(dict.fromkeys([*base_tags, "self-play", "grpo", tag, cycle_tag]))
+                else:
+                    wandb_cfg["enabled"] = False
+
+                train_cfg_path = cfg_dir / f"{cycle_tag}_train.yaml"
+                _dump_yaml(train_cfg_path, train_cfg)
+
+                if wandb_run is not None:
+                    _wandb_log(wandb_run, {"loop/status_code": 5, "loop/status": "train_start", "rollout/cycle": cycle})
+
+                train_module_args = ["--config", str(train_cfg_path)]
+                if args.max_steps is not None:
+                    train_module_args += ["--max_steps", str(args.max_steps)]
+                if args.max_train_samples is not None:
+                    train_module_args += ["--max_train_samples", str(args.max_train_samples)]
+                if args.max_eval_samples is not None:
+                    train_module_args += ["--max_eval_samples", str(args.max_eval_samples)]
+                train_cmd = _build_train_command(
+                    python=python,
+                    launcher=args.train_launcher,
+                    num_processes=args.train_num_processes,
+                    train_module_args=train_module_args,
+                )
+                train_s, train_gpu = _run_timed_with_gpu_sampling(
+                    train_cmd,
+                    cwd=root,
+                    env=env,
+                    gpu_indices=gpu_indices,
+                    **(
+                        {
+                            "wandb_run": wandb_run,
+                            "heartbeat_prefix": "heartbeat/solver_train",
+                            "heartbeat_payload": {
+                                "loop/status": "solver_train_running",
+                                "rollout/cycle": cycle,
+                                "loop/cycle_index": cycle,
+                            },
+                            "heartbeat_every_s": 30.0,
+                        }
+                        if wandb_run is not None
+                        else {}
+                    ),
+                )
+
+                latest_ckpt = _latest_checkpoint(cycle_train_out)
+                if latest_ckpt is not None:
+                    current_solver_model = str(latest_ckpt)
+                    print(f"[loop] next cycle solver model: {current_solver_model}", flush=True)
+                else:
+                    print("[loop] no checkpoint found; next cycle keeps template model", flush=True)
             else:
-                wandb_cfg["enabled"] = False
-
-            train_cfg_path = cfg_dir / f"{cycle_tag}_train.yaml"
-            _dump_yaml(train_cfg_path, train_cfg)
-
-            if wandb_run is not None:
-                _wandb_log(wandb_run, {"loop/status_code": 5, "loop/status": "train_start", "rollout/cycle": cycle})
-
-            train_module_args = ["--config", str(train_cfg_path)]
-            if args.max_steps is not None:
-                train_module_args += ["--max_steps", str(args.max_steps)]
-            if args.max_train_samples is not None:
-                train_module_args += ["--max_train_samples", str(args.max_train_samples)]
-            if args.max_eval_samples is not None:
-                train_module_args += ["--max_eval_samples", str(args.max_eval_samples)]
-            train_cmd = _build_train_command(
-                python=python,
-                launcher=args.train_launcher,
-                num_processes=args.train_num_processes,
-                train_module_args=train_module_args,
-            )
-            train_s, train_gpu = _run_timed_with_gpu_sampling(
-                train_cmd,
-                cwd=root,
-                env=env,
-                gpu_indices=gpu_indices,
-                **(
-                    {
-                        "wandb_run": wandb_run,
-                        "heartbeat_prefix": "heartbeat/solver_train",
-                        "heartbeat_payload": {
-                            "loop/status": "solver_train_running",
-                            "rollout/cycle": cycle,
-                            "loop/cycle_index": cycle,
-                        },
-                        "heartbeat_every_s": 30.0,
-                    }
-                    if wandb_run is not None
-                    else {}
-                ),
-            )
-
-            latest_ckpt = _latest_checkpoint(cycle_train_out)
-            if latest_ckpt is not None:
-                current_solver_model = str(latest_ckpt)
-                print(f"[loop] next cycle solver model: {current_solver_model}", flush=True)
-            else:
-                print("[loop] no checkpoint found; next cycle keeps template model", flush=True)
+                print("[loop] skipping solver GRPO train this cycle", flush=True)
 
             cycle_s = time.perf_counter() - cycle_t0
             if wandb_run is not None:
@@ -1539,8 +1602,9 @@ def main() -> None:
                     perf_payload.update(
                         {f"question_train_gpu/{k}": v for k, v in question_train_gpu.items()}
                     )
-                    perf_payload.update(_extract_train_perf_metrics(cycle_train_out))
-                    perf_payload.update(_extract_train_scalar_metrics(cycle_train_out))
+                    if cycle_train_out is not None:
+                        perf_payload.update(_extract_train_perf_metrics(cycle_train_out))
+                        perf_payload.update(_extract_train_scalar_metrics(cycle_train_out))
                     perf_payload.update(train_gpu)
                     util_keys = [k for k in train_gpu.keys() if k.endswith("/util_gpu_pct_mean")]
                     if util_keys:

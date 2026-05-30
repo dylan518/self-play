@@ -116,7 +116,7 @@ class TestVerifier(unittest.TestCase):
         self.assertIn("Answer: 35/396", prompt)
         self.assertNotIn("Answer: 35\n", prompt)
 
-    def test_answer_only_prompt_does_not_include_candidate_solution(self) -> None:
+    def test_answer_prompt_includes_full_candidate_solution(self) -> None:
         template = Path("grpo_math/prompts/single_solution_verify_prompt.txt").read_text(encoding="utf-8")
         prompt = render_verifier_prompt(
             template,
@@ -125,8 +125,8 @@ class TestVerifier(unittest.TestCase):
         )
 
         self.assertIn("Candidate answer:\n4", prompt)
-        self.assertNotIn("Candidate solution:", prompt)
-        self.assertNotIn("This reasoning should not be shown.", prompt)
+        self.assertIn("Full candidate solution:", prompt)
+        self.assertIn("This reasoning should not be shown.", prompt)
 
     def test_extract_candidate_final_answer_uses_last_full_text_answer(self) -> None:
         self.assertEqual(
@@ -437,8 +437,8 @@ class TestVerifier(unittest.TestCase):
         self.assertIn("Candidate answer:\n35/396", prompt)
         self.assertIn("candidate_final_answer = 35/396", prompt)
         self.assertIn("candidate_as_fraction = 35/396", prompt)
-        self.assertNotIn("Candidate solution:", prompt)
-        self.assertNotIn("Wrong intermediate draft.", prompt)
+        self.assertIn("Full candidate solution:", prompt)
+        self.assertIn("Wrong intermediate draft.", prompt)
 
 
 if __name__ == "__main__":

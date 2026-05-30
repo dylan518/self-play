@@ -3,15 +3,12 @@ from __future__ import annotations
 import unittest
 
 from grpo_math.self_play.generate_pairwise_data import (
-    _append_python_tool_result,
     _build_qwen_continuation_prompt,
     _extract_chat_reasoning,
     _extract_chat_content,
     _extract_completion_text,
     _extract_configured_thinking_budget,
-    _execute_python_tool_code,
     _openai_generate_texts,
-    _PYTHON_VERIFY_TOOL,
     _parse_question,
     _parse_solver_final_answer,
     _parse_verdict,
@@ -28,12 +25,11 @@ class TestGeneratePairwiseDataHelpers(unittest.TestCase):
             "How many integers n satisfy n^2 < 100?",
         )
 
-    def test_parse_solver_final_answer_accepts_non_integer_text(self) -> None:
-        self.assertEqual(_parse_solver_final_answer("work\nFINAL_ANSWER: 85/1728"), "85/1728")
-        self.assertEqual(
-            _parse_solver_final_answer("work\nFINAL_ANSWER: Alice, Dana, Bob, Charlie"),
-            "Alice, Dana, Bob, Charlie",
-        )
+    def test_parse_solver_final_answer_accepts_short_numeric_answers(self) -> None:
+        self.assertEqual(_parse_solver_final_answer("work\nFINAL_ANSWER: 85"), "85")
+        self.assertEqual(_parse_solver_final_answer("work\nFINAL_ANSWER: -3"), "-3")
+        self.assertIsNone(_parse_solver_final_answer("work\nFINAL_ANSWER: 85/1728"))
+        self.assertIsNone(_parse_solver_final_answer("work\nFINAL_ANSWER: Alice"))
 
     def test_parse_solver_final_answer_uses_final_section_not_thinking_placeholder(self) -> None:
         self.assertEqual(
@@ -44,14 +40,15 @@ class TestGeneratePairwiseDataHelpers(unittest.TestCase):
             "1367044",
         )
         self.assertIsNone(_parse_solver_final_answer("[Final]\nFINAL_ANSWER: <final answer>."))
+        self.assertEqual(_parse_solver_final_answer("[Final]\nFINAL_ANSWER: 1367044\nextra text"), "1367044")
+        self.assertEqual(_parse_solver_final_answer("[Final]\nFINAL_ANSWER: 1\nFINAL_ANSWER: 2"), "2")
 
-    def test_parse_solver_final_answer_recovers_simple_final_answer_sentence(self) -> None:
-        self.assertEqual(
+    def test_parse_solver_final_answer_rejects_answer_sentence_fallback(self) -> None:
+        self.assertIsNone(
             _parse_solver_final_answer(
                 "[Thinking]\nMaybe the answer is 99.\n\n"
                 "[Final]\nSince n=1 works, the answer is 1."
-            ),
-            "1",
+            )
         )
 
     def test_parse_verdict_missing_label_is_unclear(self) -> None:
@@ -60,43 +57,6 @@ class TestGeneratePairwiseDataHelpers(unittest.TestCase):
             _parse_verdict("This seems incorrect in the reasoning.\nVERDICT: CORRECT"),
             "CORRECT",
         )
-
-    def test_append_python_tool_result(self) -> None:
-        prompt = _append_python_tool_result(
-            "Verifier prompt",
-            question="What is 2 plus 2?",
-            solution="FINAL_ANSWER: 4",
-            enabled=True,
-            timeout_s=5,
-        )
-
-        self.assertIn("Python tool result:", prompt)
-        self.assertIn("candidate_final_answer = 4", prompt)
-
-    def test_append_python_tool_result_preserves_fraction_answer(self) -> None:
-        prompt = _append_python_tool_result(
-            "Verifier prompt\nCandidate answer:\n35/396",
-            question="A probability question.",
-            solution="work\nFINAL_ANSWER: 35/396",
-            enabled=True,
-            timeout_s=5,
-        )
-
-        self.assertIn("Candidate answer:\n35/396", prompt)
-        self.assertIn("candidate_final_answer = 35/396", prompt)
-        self.assertIn("candidate_as_fraction = 35/396", prompt)
-
-    def test_python_exec_tool_schema_accepts_code(self) -> None:
-        self.assertEqual(_PYTHON_VERIFY_TOOL["function"]["name"], "python_exec")
-        params = _PYTHON_VERIFY_TOOL["function"]["parameters"]
-        self.assertEqual(params["required"], ["code"])
-        self.assertIn("code", params["properties"])
-
-    def test_execute_python_tool_code_returns_stdout(self) -> None:
-        result = _execute_python_tool_code("print(2 + 2)", timeout_s=5)
-
-        self.assertIn("exit_code = 0", result)
-        self.assertIn("stdout:\n4", result)
 
     def test_extract_chat_content_does_not_use_hidden_reasoning_by_default(self) -> None:
         with self.assertRaises(KeyError):

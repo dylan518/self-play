@@ -6,7 +6,10 @@ model:
   use_flash_attn: true
 
 data:
-  source: "question_generation"
+  source: "rollout_rewards"
+  jsonl_path: ""
+  min_reward_gap: 0.05
+  max_pairs_per_group: 512
   question_bank_path: "examples_gemini31flashlite_preview_nocategory_30.json"
   num_examples: 8
   question_bank_seed: 4321
@@ -21,57 +24,7 @@ prompt:
   template_path: "grpo_math/prompts/question_generator_prompt.txt"
 
 reward:
-  mode: "question"
-  question_weight: 1.0
-  question_format_weight: 0.1
-  question:
-    lambda_verifiability: 0.35
-    confirm_soft_reward: 0.2
-    num_solutions_per_question: 4
-    judge_repeats_per_question: 2
-    solver_prompt_template: |
-      Question:
-      {question}
-
-      Put the final answer first. Your first line must be exactly:
-      FINAL_ANSWER: <integer>
-      Then include a concise check if useful. Do not write more than 6 lines total.
-    solver:
-      api_model: "Qwen/Qwen3.5-9B"
-      api_tokenizer_name_or_path: "Qwen/Qwen3.5-9B"
-      api_base_url: "http://127.0.0.1:8001/v1"
-      api_key: "EMPTY"
-      api_max_tokens_param: "max_tokens"
-      api_extra_body:
-        chat_template_kwargs:
-          enable_thinking: true
-          thinking_budget: 256
-      include_reasoning_in_output: false
-      api_final_max_tokens: 64
-      api_final_prefill: "FINAL_ANSWER: "
-      api_timeout_s: 180
-      api_max_retries: 4
-      api_backoff_initial_s: 0.5
-      api_max_parallel: 8
-      temperature: 1.2
-      top_p: 0.98
-      max_new_tokens: 1024
-    judge:
-      verify_prompt_template_path: "grpo_math/prompts/single_solution_verify_prompt.txt"
-      api_model: "Qwen/Qwen3.5-9B"
-      api_base_url: "http://127.0.0.1:8001/v1"
-      api_key: "EMPTY"
-      api_max_tokens_param: "max_tokens"
-      api_extra_body:
-        chat_template_kwargs:
-          enable_thinking: false
-      api_timeout_s: 180
-      api_max_retries: 4
-      api_backoff_initial_s: 0.5
-      api_max_parallel: 8
-      temperature: 0.0
-      top_p: 1.0
-      max_new_tokens: 256
+  mode: "rollout_rewards"
 
 rollout:
   k: 4
@@ -81,7 +34,7 @@ rollout:
 
 train:
   output_dir: "outputs/trl_grpo_question_qwen35_overnight"
-  steps: 5
+  steps: 25
   prompts_per_step: 8
   grad_accum_steps: 1
   lora:
@@ -91,9 +44,12 @@ train:
     dropout: 0.05
     bias: "none"
     target_modules: "all-linear"
-  lr: 1.0e-5
+  lr: 5.0e-5
   warmup_steps: 0
   kl_beta: 0.01
+  dpo_beta: 0.1
+  max_prompt_length: 1024
+  max_completion_length: 512
   gradient_checkpointing: true
   eval_every: 0
   save_every: 5

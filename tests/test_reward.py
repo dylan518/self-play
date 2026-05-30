@@ -31,8 +31,10 @@ class TestRewardParsing(unittest.TestCase):
         # Tolerate floats that are mathematically integers
         self.assertEqual(extract_final_answer_int_strict("FINAL_ANSWER: 30.00"), 30)
         self.assertIsNone(extract_final_answer_int_strict("FINAL_ANSWER: 30.5"))
-        # Allow some models to continue without inserting a newline
+        # Leave malformed tail handling to the verifier/judge.
         self.assertEqual(extract_final_answer_int_strict("FINAL_ANSWER: 12Human: blah"), 12)
+        self.assertEqual(extract_final_answer_int_strict("FINAL_ANSWER: 12\nmore text"), 12)
+        self.assertEqual(extract_final_answer_int_strict("FINAL_ANSWER: 12\nFINAL_ANSWER: 13"), 13)
 
     def test_canonicalize_final_answer_text_truncates_tail(self) -> None:
         text = "work\nFINAL_ANSWER: 12\njunk after answer 999"

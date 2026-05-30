@@ -86,10 +86,16 @@ def _build_prompt_context(config_path: Path | None) -> dict[str, str]:
         "judge_template": judge_template,
         "verify_template": verify_template,
         "generator_model": str(gen_cfg.get("api_model", gen_cfg.get("model_name_or_path", ""))),
+        "generator_temperature": str(gen_cfg.get("temperature", "")),
+        "generator_top_p": str(gen_cfg.get("top_p", "")),
         "generator_max_new_tokens": str(gen_cfg.get("max_new_tokens", "")),
         "solver_model": str(sol_cfg.get("api_model", sol_cfg.get("model_name_or_path", ""))),
+        "solver_temperature": str(sol_cfg.get("temperature", "")),
+        "solver_top_p": str(sol_cfg.get("top_p", "")),
         "solver_max_new_tokens": str(sol_cfg.get("max_new_tokens", "")),
         "judge_model": str(judge_cfg.get("api_model", judge_cfg.get("model_name_or_path", ""))),
+        "judge_temperature": str(judge_cfg.get("temperature", "")),
+        "judge_top_p": str(judge_cfg.get("top_p", "")),
         "judge_max_new_tokens": str(judge_cfg.get("max_new_tokens", "")),
         "judge_repeats_per_solution": str(judge_cfg.get("repeats_per_solution", "")),
         "judge_python_assisted": str(judge_cfg.get("python_assisted", False)),
@@ -172,10 +178,16 @@ def _row_readme(row: dict[str, Any], prompt_ctx: dict[str, str]) -> str:
         out.append("")
         out.append(f"- Config: `{prompt_ctx.get('config_path', '')}`")
         out.append(f"- Generator model: `{prompt_ctx.get('generator_model', '')}`")
+        out.append(f"- Generator temperature: `{prompt_ctx.get('generator_temperature', '')}`")
+        out.append(f"- Generator top_p: `{prompt_ctx.get('generator_top_p', '')}`")
         out.append(f"- Generator max_new_tokens: `{prompt_ctx.get('generator_max_new_tokens', '')}`")
         out.append(f"- Solver model: `{prompt_ctx.get('solver_model', '')}`")
+        out.append(f"- Solver temperature: `{prompt_ctx.get('solver_temperature', '')}`")
+        out.append(f"- Solver top_p: `{prompt_ctx.get('solver_top_p', '')}`")
         out.append(f"- Solver max_new_tokens: `{prompt_ctx.get('solver_max_new_tokens', '')}`")
         out.append(f"- Judge model: `{prompt_ctx.get('judge_model', '')}`")
+        out.append(f"- Judge temperature: `{prompt_ctx.get('judge_temperature', '')}`")
+        out.append(f"- Judge top_p: `{prompt_ctx.get('judge_top_p', '')}`")
         out.append(f"- Judge max_new_tokens: `{prompt_ctx.get('judge_max_new_tokens', '')}`")
         out.append(f"- Judge repeats_per_solution: `{prompt_ctx.get('judge_repeats_per_solution', '')}`")
         out.append(f"- Judge python_assisted: `{prompt_ctx.get('judge_python_assisted', '')}`")
@@ -237,6 +249,8 @@ def _row_readme(row: dict[str, Any], prompt_ctx: dict[str, str]) -> str:
             out.append(
                 f"- Verdict counts: `{json.dumps(v.get('counts', {}), ensure_ascii=True)}`"
             )
+            if v.get("format_check") is not None:
+                out.append(f"- Format check: `{v.get('format_check')}`")
             out.append(f"- Verdict confidence: `{v.get('confidence')}`")
             out.append(f"- Model confidence mean: `{v.get('model_confidence_mean')}`")
             out.append("")

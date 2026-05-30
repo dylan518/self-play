@@ -13,7 +13,7 @@ from grpo_math.self_play.generate_pairwise_data import (
 
 
 class TestGeneratePairwiseGeneration(unittest.TestCase):
-    def test_select_verify_indices_samples_only_parseable_solutions(self) -> None:
+    def test_select_verify_indices_samples_from_all_solutions(self) -> None:
         indices = _select_verify_indices(
             [1, None, 2, 3, None, 4, 5, 6],
             3,
@@ -22,9 +22,14 @@ class TestGeneratePairwiseGeneration(unittest.TestCase):
 
         self.assertEqual(len(indices), 3)
         self.assertEqual(indices, sorted(indices))
-        self.assertTrue(set(indices).issubset({0, 2, 3, 5, 6, 7}))
+        self.assertTrue(set(indices).issubset(set(range(8))))
 
     def test_canonicalize_solver_output_stops_at_final_answer(self) -> None:
+        raw = "reasoning\nFINAL_ANSWER: 46"
+
+        self.assertEqual(_canonicalize_solver_output(raw), "reasoning\nFINAL_ANSWER: 46")
+
+    def test_canonicalize_solver_output_stops_at_first_final_answer(self) -> None:
         raw = "reasoning\nFINAL_ANSWER: 46\nmore tokens 123"
 
         self.assertEqual(_canonicalize_solver_output(raw), "reasoning\nFINAL_ANSWER: 46")
@@ -32,23 +37,45 @@ class TestGeneratePairwiseGeneration(unittest.TestCase):
     def test_parse_question_strips_confirm_and_reads_confirmation(self) -> None:
         raw = (
             "QUESTION: Find the smallest n divisible by 7.\n"
-            "CONFIRM: different_from_samples=yes; integer_answer=yes; why=uses modular arithmetic."
+            "CONFIRM: different_from_samples=yes; single_unambiguous_answer=yes; why=uses modular arithmetic."
         )
 
         self.assertEqual(_parse_question(raw), "Find the smallest n divisible by 7.")
         self.assertEqual(
             _parse_question_confirm(raw),
-            (True, "different_from_samples=yes; integer_answer=yes; why=uses modular arithmetic."),
+            (True, "different_from_samples=yes; single_unambiguous_answer=yes; why=uses modular arithmetic."),
         )
 
     def test_parse_question_confirm_rejects_self_correction(self) -> None:
         raw = (
             "QUESTION: What is 1+1?\n"
-            "CONFIRM: different_from_samples=yes; integer_answer=yes; why=ok. "
+            "CONFIRM: different_from_samples=yes; single_unambiguous_answer=yes; why=ok. "
             "Wait, better question: What is 2+2?"
         )
 
         self.assertEqual(_parse_question_confirm(raw)[0], False)
+
+    def test_parse_question_confirm_requires_unambiguous_answer(self) -> None:
+        raw = (
+            "QUESTION: Name a beautiful theorem.\n"
+            "CONFIRM: different_from_samples=yes; single_unambiguous_answer=no; why=subjective."
+        )
+
+        self.assertEqual(
+            _parse_question_confirm(raw),
+            (False, "different_from_samples=yes; single_unambiguous_answer=no; why=subjective."),
+        )
+
+    def test_parse_question_confirm_accepts_legacy_integer_contract(self) -> None:
+        raw = (
+            "QUESTION: Find the smallest n divisible by 7.\n"
+            "CONFIRM: different_from_samples=yes; integer_answer=yes; why=legacy prompt."
+        )
+
+        self.assertEqual(
+            _parse_question_confirm(raw),
+            (True, "different_from_samples=yes; integer_answer=yes; why=legacy prompt."),
+        )
 
     def test_zero_temperature_uses_greedy_decoding(self) -> None:
         class FakeTensor:

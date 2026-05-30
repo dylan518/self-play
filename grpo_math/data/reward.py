@@ -8,7 +8,7 @@ _INT_RE = re.compile(r"-?\d+")
 # Accept integers, and also tolerate floats that are mathematically integers (e.g. "30.00").
 # We intentionally allow trailing text (e.g. "FINAL_ANSWER: 30Human: ...") because some models
 # sometimes continue the transcript without inserting a newline. We still require the explicit tag.
-_FINAL_ANSWER_RE = re.compile(r"FINAL_ANSWER\s*:\s*(-?\d+)(?:\.0+)?(?![\d.])")
+_FINAL_ANSWER_RE = re.compile(r"FINAL_ANSWER\s*:\s*(-?\d+)(?:\.0+)?(?![\d./])")
 
 
 def extract_ground_truth_int(gsm8k_answer_text: str) -> Optional[int]:

@@ -50,12 +50,16 @@ _BATCH_VERIFY_LINE_RE = re.compile(
 _CONFIRM_LINE_RE = re.compile(r"CONFIRM\s*:\s*([^\n\r]+)", flags=re.IGNORECASE)
 _CONFIRM_RE = _CONFIRM_LINE_RE
 _DIFFERENT_FROM_SAMPLES_RE = re.compile(r"different_from_samples\s*=\s*(yes|no)", flags=re.IGNORECASE)
+_SINGLE_UNAMBIGUOUS_ANSWER_RE = re.compile(
+    r"single_unambiguous_answer\s*=\s*(yes|no)",
+    flags=re.IGNORECASE,
+)
+_LEGACY_INTEGER_ANSWER_RE = re.compile(r"integer_answer\s*=\s*(yes|no)", flags=re.IGNORECASE)
 _BOXED_INT_RE = re.compile(r"\\boxed\{\s*(-?\d+)\s*\}")
 _FINAL_TEXT_INT_RE = re.compile(r"(?:Final Answer|Final answer)\s*[:\-]?\s*(-?\d+)\b")
 _ANSWER_IS_INT_RE = re.compile(r"(?:answer|result)\s+is\s+(-?\d+)", flags=re.IGNORECASE)
 _EQUALS_INT_EOL_RE = re.compile(r"=\s*(-?\d+)\s*$", flags=re.MULTILINE)
 _ANY_INT_RE = re.compile(r"-?\d+")
-
 
 @dataclass
 class ModelBundle:
@@ -131,18 +135,18 @@ def _load_model_bundle(name_or_path: str, torch_dtype: torch.dtype, use_flash_at
 
     kwargs: Dict[str, Any] = {"dtype": torch_dtype, "attn_implementation": _attn_impl(use_flash_attn)}
     if is_adapter_checkpoint:
-        try:
-            from peft import PeftModel
-        except Exception as e:
-            raise RuntimeError(
-                "Adapter checkpoint detected but `peft` is not installed. Install with `pip install peft`."
-            ) from e
-        try:
-            base_model = AutoModelForCausalLM.from_pretrained(tokenizer_source, **kwargs)
-        except Exception:
-            kwargs.pop("attn_implementation", None)
-            base_model = AutoModelForCausalLM.from_pretrained(tokenizer_source, **kwargs)
-        model = PeftModel.from_pretrained(base_model, model_source, is_trainable=False)
+        from grpo_math.trl.train_grpo_trl import _load_adapter_model_if_needed
+
+        torch_dtype = kwargs.get("dtype", torch.float16)
+        attn_impl = kwargs.get("attn_implementation", "sdpa")
+        model, tokenizer_source, _loaded = _load_adapter_model_if_needed(
+            model_source,
+            torch_dtype=torch_dtype,
+            attn_impl=str(attn_impl),
+            is_trainable=False,
+        )
+        if not _loaded:
+            raise RuntimeError(f"Failed to load adapter checkpoint: {model_source}")
         print(f"[model] loaded LoRA adapter for generation: {model_source} (base={tokenizer_source})", flush=True)
     else:
         try:
@@ -227,6 +231,7 @@ def _parse_question(text: str) -> str:
     # Enforce question-only output even if the model leaks answer fields.
     candidate = re.sub(r"\n?\s*(ANSWER|FINAL_ANSWER)\s*:.*$", "", candidate, flags=re.IGNORECASE | re.DOTALL)
     candidate = re.sub(r"\n?\s*CONFIRM\s*:.*$", "", candidate, flags=re.IGNORECASE | re.DOTALL)
+    candidate = re.sub(r"\n?\s*VERIFICATION\s+IDEA\s*:.*$", "", candidate, flags=re.IGNORECASE | re.DOTALL)
     return candidate.strip()
 
 
@@ -236,14 +241,28 @@ def _parse_question_confirm(text: str) -> tuple[bool, str]:
         return False, ""
     confirm = m.group(1).strip()
     dm = _DIFFERENT_FROM_SAMPLES_RE.search(confirm)
-    integer_ok = re.search(r"integer_answer\s*=\s*yes", confirm, flags=re.IGNORECASE) is not None
+    answer_contract = _SINGLE_UNAMBIGUOUS_ANSWER_RE.search(confirm)
+    if not answer_contract:
+        # Backward compatibility for artifacts generated before the prompt
+        # switched from integer-only answers to exact unambiguous answers.
+        answer_contract = _LEGACY_INTEGER_ANSWER_RE.search(confirm)
     self_correction = re.search(
         r"\b(wait|revised\s+question|better\s+question|answer\s+is|final_answer)\b",
         confirm,
         flags=re.IGNORECASE,
     )
     concise = len(confirm) <= 400 and "\n" not in confirm
-    return (bool(dm and dm.group(1).lower() == "yes" and integer_ok and concise and not self_correction), confirm)
+    return (
+        bool(
+            dm
+            and dm.group(1).lower() == "yes"
+            and answer_contract
+            and answer_contract.group(1).lower() == "yes"
+            and concise
+            and not self_correction
+        ),
+        confirm,
+    )
 
 
 def _parse_preference(text: str) -> str:
@@ -261,7 +280,7 @@ def _parse_verdict(text: str) -> str:
     m2 = _BOOL_VERDICT_RE.search(text)
     if m2:
         return "CORRECT" if m2.group(1).upper() == "TRUE" else "INCORRECT"
-    return "INCORRECT"
+    return "UNCLEAR"
 
 
 def _parse_verdict_optional(text: str) -> str | None:
@@ -297,25 +316,9 @@ def _parse_batch_verify_output(text: str, num_solutions: int) -> Dict[int, tuple
     return out
 
 
-def _parse_solver_final_answer(text: str) -> int | None:
-    # Prefer strict training format when present.
-    strict = extract_final_answer_int_strict(text)
-    if strict is not None:
-        return strict
-    # Fallbacks for analysis-time metadata in pairwise rollouts.
-    boxed_matches = _BOXED_INT_RE.findall(text)
-    if boxed_matches:
-        return int(boxed_matches[-1])
-    final_text_matches = _FINAL_TEXT_INT_RE.findall(text)
-    if final_text_matches:
-        return int(final_text_matches[-1])
-    answer_is_matches = _ANSWER_IS_INT_RE.findall(text)
-    if answer_is_matches:
-        return int(answer_is_matches[-1])
-    equals_eol_matches = _EQUALS_INT_EOL_RE.findall(text)
-    if equals_eol_matches:
-        return int(equals_eol_matches[-1])
-    return None
+def _parse_solver_final_answer(text: str) -> str | None:
+    parsed = extract_final_answer_int_strict(text)
+    return None if parsed is None else str(parsed)
 
 
 def _canonicalize_solver_output(text: str) -> str:
@@ -352,12 +355,12 @@ def _select_verify_indices(
     *,
     rng: random.Random | None = None,
 ) -> List[int]:
-    valid_indices = [idx for idx, ans in enumerate(parsed_answers) if ans is not None]
-    sample_size = max(0, min(len(valid_indices), int(sample_size)))
-    if sample_size >= len(valid_indices):
-        return valid_indices
+    candidate_indices = list(range(len(parsed_answers)))
+    sample_size = max(0, min(len(candidate_indices), int(sample_size)))
+    if sample_size >= len(candidate_indices):
+        return candidate_indices
     sampler = rng if rng is not None else random
-    return sorted(sampler.sample(valid_indices, sample_size))
+    return sorted(sampler.sample(candidate_indices, sample_size))
 
 
 def _elo_expected(r_a: float, r_b: float) -> float:
@@ -647,6 +650,15 @@ def _extract_configured_thinking_budget(extra_body: Dict[str, Any] | None) -> in
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+def _extract_tool_calls(body: Dict[str, Any]) -> list[Dict[str, Any]]:
+    try:
+        msg = body["choices"][0]["message"]
+    except Exception:
+        return []
+    tool_calls = msg.get("tool_calls")
+    return tool_calls if isinstance(tool_calls, list) else []
 
 
 def _build_qwen_continuation_prompt(
@@ -1420,6 +1432,8 @@ def main() -> None:
                     "run_id": run_id,
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "question_index": question_index_base + (q_idx - 1),
+                    "proposer_group_id": run_id,
+                    "proposer_prompt": raw_gen_prompt,
                     "question": question,
                     "generator_raw_output": cleaned_question_generations[q_idx - 1],
                     "generator_confirm": {
@@ -1618,11 +1632,6 @@ def main() -> None:
                                 max_new_tokens=int(judge_cfg.get("max_new_tokens", 64)),
                                 batch_size=int(judge_cfg.get("batch_size", 32)),
                             )
-                    for s_idx in range(num_solutions):
-                        if solver_parsed_answers[s_idx] is None:
-                            for _ in range(verify_repeats):
-                                per_solution[s_idx]["verdicts"].append("INCORRECT")
-                                per_solution[s_idx]["model_confidences"].append(0.0)
                     for output in verify_outputs:
                         parsed_rows = _parse_batch_verify_output(output, num_solutions)
                         for s_idx in valid_indices:
@@ -1639,14 +1648,12 @@ def main() -> None:
                     for s_idx, s_text in enumerate(solver_outputs):
                         if s_idx not in sampled_verify_indices:
                             continue
-                        # Skip solutions with no parsed answer — auto-mark INCORRECT without calling verifier.
-                        if solver_parsed_answers[s_idx] is None:
-                            for _ in range(verify_repeats):
-                                per_solution[s_idx]["verdicts"].append("INCORRECT")
-                                per_solution[s_idx]["model_confidences"].append(0.0)
-                            continue
                         for _ in range(verify_repeats):
-                            candidate_answer = str(solver_parsed_answers[s_idx])
+                            candidate_answer = (
+                                str(solver_parsed_answers[s_idx])
+                                if solver_parsed_answers[s_idx] is not None
+                                else s_text
+                            )
                             raw_prompt = verify_template.format(
                                 question=question,
                                 solution=s_text,
@@ -1854,6 +1861,8 @@ def main() -> None:
                 "run_id": run_id,
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                 "question_index": question_index_base + (q_idx - 1),
+                "proposer_group_id": run_id,
+                "proposer_prompt": raw_gen_prompt,
                 "question": question,
                 "generator_raw_output": cleaned_question_generations[q_idx - 1],
                 "generator_confirm": {

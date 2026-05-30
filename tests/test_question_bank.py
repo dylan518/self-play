@@ -167,6 +167,7 @@ class TestQuestionBank(unittest.TestCase):
 
         self.assertIn("Output exactly two lines", prompt)
         self.assertIn("CONFIRM: different_from_samples=<yes/no>", prompt)
+        self.assertIn("integer_answer=<yes/no>", prompt)
         self.assertIn("single integer final answer", prompt)
 
     def test_normalizes_optional_generation_confirmation(self) -> None:

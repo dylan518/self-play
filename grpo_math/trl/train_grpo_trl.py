@@ -272,14 +272,13 @@ def _confirm_different_from_samples(text: str) -> bool:
         return False
     confirm = m.group(1).strip()
     dm = _DIFFERENT_FROM_SAMPLES_RE.search(confirm)
-    integer_ok = re.search(r"integer_answer\s*=\s*yes", confirm, flags=re.IGNORECASE) is not None
     self_correction = re.search(
         r"\b(wait|revised\s+question|better\s+question|answer\s+is|final_answer)\b",
         confirm,
         flags=re.IGNORECASE,
     )
     concise = len(confirm) <= 400 and "\n" not in confirm
-    return bool(dm and dm.group(1).lower() == "yes" and integer_ok and concise and not self_correction)
+    return bool(dm and dm.group(1).lower() == "yes" and concise and not self_correction)
 
 
 def _build_verdict_teacher_prompts(
@@ -296,12 +295,19 @@ def _build_verdict_teacher_prompts(
         if candidate_answer is None:
             if not allow_lenient_answer:
                 continue
-            pred = extract_final_answer_int(c)
+            pred = extract_final_answer_int_strict(c)
             if pred is None:
                 continue
             candidate_answer = f"{c.rstrip()}\n\nFINAL_ANSWER: {pred}"
         valid_indices.append(idx)
-        verify_prompts.append(teacher_template.format(question=q, candidate_answer=candidate_answer))
+        verify_prompts.append(
+            teacher_template.format(
+                question=q,
+                candidate_answer=candidate_answer,
+                solution=c,
+                completion=c,
+            )
+        )
     return valid_indices, verify_prompts
 
 
@@ -371,11 +377,153 @@ def _maybe_build_lora_config(cfg: Dict[str, Any]) -> Any | None:
     )
 
 
+def _remap_adapter_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """
+    TRL/DPO checkpoints for Qwen3.5 may save keys like
+    `...language_model.layers...lora_A.weight` while a fresh PeftModel expects
+    `...layers...lora_A.default.weight`. Remap so resumed training/eval loads weights.
+    """
+    remapped: Dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        new_key = key.replace(".language_model.layers.", ".layers.")
+        new_key = re.sub(r"\.lora_([AB])\.weight$", r".lora_\1.default.weight", new_key)
+        remapped[new_key] = value
+    return remapped
+
+
+def _adapter_param_suffix(key: str) -> str:
+    """Normalize checkpoint / model parameter names for comparison."""
+    key = key.replace(".language_model.layers.", ".layers.")
+    key = re.sub(r"\.lora_([AB])\.weight$", r".lora_\1.default.weight", key)
+    for prefix in (
+        "base_model.model.model.",
+        "base_model.model.",
+        "model.model.",
+    ):
+        if key.startswith(prefix):
+            return key[len(prefix) :]
+    return key
+
+
+def _read_adapter_state_dict(adapter_path: Path) -> Dict[str, torch.Tensor]:
+    weights_path = adapter_path / "adapter_model.safetensors"
+    if not weights_path.exists():
+        weights_path = adapter_path / "adapter_model.bin"
+    if not weights_path.exists():
+        raise FileNotFoundError(f"No adapter weights found under {adapter_path}")
+    if weights_path.suffix == ".safetensors":
+        from safetensors.torch import load_file
+
+        return dict(load_file(str(weights_path)))
+    return dict(torch.load(weights_path, map_location="cpu", weights_only=True))
+
+
+def _adapter_tensors_by_suffix(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Index checkpoint tensors by normalized suffix (last key wins on duplicates)."""
+    remapped = _remap_adapter_state_dict_keys(state_dict)
+    by_suffix: Dict[str, torch.Tensor] = {}
+    for key, value in remapped.items():
+        if "lora_" not in key:
+            continue
+        by_suffix[_adapter_param_suffix(key)] = value
+    return by_suffix
+
+
+def _model_lora_params_by_suffix(peft_model: Any) -> Dict[str, Any]:
+    by_suffix: Dict[str, Any] = {}
+    for name, param in peft_model.named_parameters():
+        if "lora_" not in name:
+            continue
+        suffix = _adapter_param_suffix(name)
+        by_suffix[suffix] = param
+    return by_suffix
+
+
+def _load_adapter_weights_into_peft_model(peft_model: Any, adapter_path: Path) -> dict[str, int]:
+    """
+    Copy adapter tensors by normalized suffix instead of raw state_dict keys.
+    AutoPeft / load_state_dict often miss Qwen3.5 linear-attn LoRA (especially lora_B).
+    """
+    file_state = _read_adapter_state_dict(adapter_path)
+    file_by_suffix = _adapter_tensors_by_suffix(file_state)
+    model_by_suffix = _model_lora_params_by_suffix(peft_model)
+
+    copied = 0
+    shape_mismatch = 0
+    no_model_param = 0
+    for suffix, file_tensor in file_by_suffix.items():
+        model_param = model_by_suffix.get(suffix)
+        if model_param is None:
+            no_model_param += 1
+            continue
+        if tuple(file_tensor.shape) != tuple(model_param.shape):
+            shape_mismatch += 1
+            continue
+        model_param.data.copy_(file_tensor.to(device=model_param.device, dtype=model_param.dtype))
+        copied += 1
+
+    return {
+        "adapter_keys_in_file": len(file_state),
+        "adapter_keys_remapped": len(file_by_suffix),
+        "adapter_tensors_copied": copied,
+        "adapter_suffix_no_model_param": no_model_param,
+        "adapter_suffix_shape_mismatch": shape_mismatch,
+        "adapter_model_lora_params": len(model_by_suffix),
+    }
+
+
+def _verify_adapter_weights_loaded(
+    peft_model: Any,
+    adapter_path: Path,
+    *,
+    min_norm_ratio: float = 0.99,
+    max_norm_ratio: float = 1.01,
+) -> dict[str, Any]:
+    """Fail fast if checkpoint tensors did not land in the loaded model."""
+    file_by_suffix = _adapter_tensors_by_suffix(_read_adapter_state_dict(adapter_path))
+    model_by_suffix = _model_lora_params_by_suffix(peft_model)
+
+    checked = 0
+    matched = 0
+    mismatches: list[str] = []
+    for suffix, file_tensor in file_by_suffix.items():
+        file_norm = float(file_tensor.float().norm().cpu())
+        if file_norm < 1e-8:
+            continue
+        checked += 1
+        model_param = model_by_suffix.get(suffix)
+        if model_param is None:
+            mismatches.append(f"no_param_for:{suffix}")
+            continue
+        model_norm = float(model_param.detach().float().cpu().norm())
+        ratio = model_norm / file_norm
+        if min_norm_ratio <= ratio <= max_norm_ratio:
+            matched += 1
+        else:
+            mismatches.append(f"{suffix}:ratio={ratio:.4f}")
+
+    ok = checked > 0 and matched == checked
+    summary = {
+        "adapter_verify_ok": ok,
+        "adapter_verify_checked": checked,
+        "adapter_verify_matched": matched,
+        "adapter_verify_mismatches": mismatches[:8],
+    }
+    print(json.dumps({"adapter_verify": summary}, sort_keys=True), flush=True)
+    if not ok:
+        raise RuntimeError(
+            f"Adapter weights from {adapter_path} did not load into the model "
+            f"(matched {matched}/{checked}). Sample mismatches: {mismatches[:5]}"
+        )
+    return summary
+
+
 def _load_adapter_model_if_needed(
     model_name_or_path: str,
     *,
     torch_dtype: torch.dtype,
     attn_impl: str,
+    is_trainable: bool = True,
 ) -> tuple[Any, str, bool]:
     """
     Returns:
@@ -399,18 +547,75 @@ def _load_adapter_model_if_needed(
             f"Adapter checkpoint {path} is missing base_model_name_or_path in adapter_config.json"
         )
     try:
-        from peft import PeftModel
+        from peft import AutoPeftModelForCausalLM, PeftModel
     except Exception as e:
         raise RuntimeError(
             "Adapter checkpoint detected but `peft` is not installed. Install with `pip install peft`."
         ) from e
+
+    load_kwargs: dict[str, Any] = {
+        "torch_dtype": torch_dtype,
+        "attn_implementation": attn_impl,
+    }
+    try:
+        adapter_model = AutoPeftModelForCausalLM.from_pretrained(str(path), **load_kwargs)
+        if is_trainable:
+            adapter_model.train()
+        else:
+            adapter_model.eval()
+        merge_stats = _load_adapter_weights_into_peft_model(adapter_model, path)
+        print(
+            json.dumps(
+                {
+                    "adapter_load": "autopeft_plus_suffix_copy",
+                    "adapter_path": str(path),
+                    "base_model": base_model_name,
+                    **merge_stats,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        _verify_adapter_weights_loaded(adapter_model, path)
+        return adapter_model, base_model_name, True
+    except Exception as autopeft_exc:
+        print(
+            json.dumps(
+                {
+                    "adapter_load": "autopeft_failed",
+                    "adapter_path": str(path),
+                    "error": f"{type(autopeft_exc).__name__}: {autopeft_exc}",
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_name,
         torch_dtype=torch_dtype,
         attn_implementation=attn_impl,
     )
-    adapter_model = PeftModel.from_pretrained(base_model, str(path), is_trainable=True)
+    adapter_model = PeftModel.from_pretrained(base_model, str(path), is_trainable=is_trainable)
+    stats = _load_adapter_weights_into_peft_model(adapter_model, path)
+    print(
+        json.dumps(
+            {
+                "adapter_load": "peft_suffix_copy",
+                "adapter_path": str(path),
+                "base_model": base_model_name,
+                **stats,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    if stats["adapter_tensors_copied"] < max(8, stats["adapter_keys_remapped"] // 2):
+        raise RuntimeError(
+            f"Too few adapter tensors copied for {path}: "
+            f"{stats['adapter_tensors_copied']}/{stats['adapter_keys_remapped']}"
+        )
+    _verify_adapter_weights_loaded(adapter_model, path)
     return adapter_model, base_model_name, True
 
 
@@ -493,7 +698,7 @@ def main() -> None:
             tail_chars = final_answer_tail_char_count(c)
             if tail_chars is not None:
                 out.append(1.0 if tail_chars == 0 else 0.5)
-            elif allow_lenient and extract_final_answer_int(c) is not None:
+            elif allow_lenient and extract_final_answer_int_strict(c) is not None:
                 out.append(0.25)
             else:
                 out.append(0.0)
@@ -511,6 +716,17 @@ def main() -> None:
             else:
                 rewards.append(max(0.0, 1.0 - min(tail_chars, 400) / 400.0))
         return rewards
+
+    def reward_clean_final_answer_format(*, prompts: List[str], completions: List[str], **_: Any) -> List[float]:
+        del prompts
+        return [1.0 if final_answer_tail_char_count(c) == 0 else 0.0 for c in completions]
+
+    def reward_verdict_gated_format(
+        *, prompts: List[str], completions: List[str], question: List[str], **kwargs: Any
+    ) -> List[float]:
+        verdict_rewards = reward_verdict(prompts=prompts, completions=completions, question=question, **kwargs)
+        clean_format_rewards = reward_clean_final_answer_format(prompts=prompts, completions=completions, **kwargs)
+        return [verdict * clean_format for verdict, clean_format in zip(verdict_rewards, clean_format_rewards, strict=True)]
 
     def reward_question_format(*, prompts: List[str], completions: List[str], **_: Any) -> List[float]:
         del prompts
@@ -581,7 +797,7 @@ def main() -> None:
         solver_prompt_template = str(
             question_reward_cfg.get(
                 "solver_prompt_template",
-                "Question:\n{question}\n\nPut the final answer first.\nFINAL_ANSWER: <integer>",
+                "Question:\n{question}\n\nPut the final answer first.\nFINAL_ANSWER: <final answer>",
             )
         )
         for idx, question_text in valid_items:
@@ -624,14 +840,22 @@ def main() -> None:
                 )
             )
         for owner, solution in zip(solver_owner, solver_outputs, strict=True):
-            if extract_final_answer_int_strict(solution) is None:
+            candidate_answer = extract_final_answer_int_strict(solution)
+            if candidate_answer is None:
                 continue
             q = extracted_questions[owner]
             if not q:
                 continue
             for _rep in range(repeats):
                 judge_owner.append(owner)
-                judge_prompts.append(verify_template.format(question=q, candidate_answer=solution))
+                judge_prompts.append(
+                    verify_template.format(
+                        question=q,
+                        candidate_answer=candidate_answer,
+                        solution=solution,
+                        completion=solution,
+                    )
+                )
 
         verdicts_by_idx: dict[int, list[str]] = {idx: [] for idx, _q in valid_items}
         if judge_prompts:
@@ -722,6 +946,9 @@ def main() -> None:
             float(cfg["reward"].get("format_weight", 0.0)),
             float(cfg["reward"].get("answer_boundary_weight", 0.0)),
         ]
+    elif reward_mode == "verdict_gated_format":
+        reward_funcs = [reward_verdict_gated_format, reward_clean_final_answer_format]
+        reward_weights = [1.0, 0.0]
     elif reward_mode == "correctness":
         reward_funcs = [reward_correct, reward_format, reward_answer_boundary]
         reward_weights = [
@@ -737,16 +964,18 @@ def main() -> None:
         ]
     else:
         raise ValueError(
-            f"Unsupported reward.mode: {reward_mode} (use 'correctness', 'verdict', or 'question')"
+            "Unsupported reward.mode: "
+            f"{reward_mode} (use 'correctness', 'verdict', 'verdict_gated_format', or 'question')"
         )
     peft_config = _maybe_build_lora_config(cfg)
     # If model is already a loaded PEFT adapter checkpoint, do not wrap with a new peft_config.
     if loaded_adapter_checkpoint:
         peft_config = None
+    eval_every = int(cfg["train"].get("eval_every", 0))
     grpo_args = GRPOConfig(
         output_dir=out_dir,
         do_train=True,
-        do_eval=True if int(cfg["train"].get("eval_every", 0)) > 0 else False,
+        do_eval=eval_every > 0,
         learning_rate=float(cfg["train"]["lr"]),
         lr_scheduler_type="cosine",
         warmup_steps=int(cfg["train"].get("warmup_steps", 0)),
@@ -759,8 +988,8 @@ def main() -> None:
         max_steps=int(args.max_steps) if args.max_steps is not None else int(cfg["train"]["steps"]),
         logging_steps=1,
         save_steps=int(cfg["train"].get("save_every", 200)),
-        eval_steps=int(cfg["train"].get("eval_every", 200)),
-        eval_strategy="steps",
+        eval_steps=eval_every if eval_every > 0 else None,
+        eval_strategy="steps" if eval_every > 0 else "no",
         save_strategy="steps",
         report_to=["wandb"] if wandb_enabled else [],
         run_name=wandb_run_name,
@@ -784,7 +1013,7 @@ def main() -> None:
         reward_funcs=reward_funcs,
         args=grpo_args,
         train_dataset=train_ds,
-        eval_dataset=eval_ds,
+        eval_dataset=eval_ds if eval_every > 0 else None,
         processing_class=tok,
         peft_config=peft_config,
     )

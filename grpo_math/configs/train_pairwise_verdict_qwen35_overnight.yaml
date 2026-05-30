@@ -18,7 +18,7 @@ prompt:
     {question}
 
     Put the final answer first. Your first line must be exactly:
-    FINAL_ANSWER: <integer>
+    FINAL_ANSWER: <final answer>
     Then include a concise check if useful. Do not write more than 6 lines total.
 
 reward:
@@ -41,20 +41,20 @@ reward:
     api_max_parallel: 8
     api_max_retries: 4
     api_backoff_initial_s: 0.5
-    temperature: 0.0
+    temperature: 1.4
     top_p: 1.0
     max_new_tokens: 128
 
 rollout:
-  k: 8
+  k: 4
   temperature: 1.1
   top_p: 0.98
-  max_new_tokens: 512
+  max_new_tokens: 384
 
 train:
   output_dir: "outputs/trl_grpo_pairwise_verdict_qwen35_9b_external_teacher_overnight"
   steps: 10
-  prompts_per_step: 16
+  prompts_per_step: 8
   grad_accum_steps: 1
   lora:
     enabled: true

@@ -6,17 +6,18 @@ Question:
 Candidate answer:
 {candidate_answer}
 
+Full candidate solution:
+{solution}
+
 Rules:
 - Verify whether the candidate answer satisfies the question constraints.
 - Use concise reasoning to check the candidate answer directly.
 - Mark CORRECT only if the candidate answer is mathematically valid.
-- If the problem is unclear/underspecified or you are unsure, mark INCORRECT.
 - Do not output TRUE/FALSE. Use the required fields below.
-- Do not revise your verdict inside the reasoning.
 
 Output exactly in this format (in this exact order):
-REASONING: <brief math check, 1-6 lines>
 VERDICT: CORRECT or INCORRECT
 CONFIDENCE: <number between 0 and 1>
+REASONING: <brief math check, 1-6 lines>
 
 All three fields are required. If any field is missing, your output is invalid.
