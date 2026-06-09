@@ -672,6 +672,50 @@ def _count_lora_trainable(model: Any, *, adapter: str = "default") -> dict[str, 
     return {"lora_tensors": total_lora, "lora_tensors_requires_grad": trainable}
 
 
+def _load_policy_adapter_into_ref_adapter(peft_model: Any, ref_adapter_path: Path) -> dict[str, int]:
+    """
+    PEFT checkpoints store only the policy (default) LoRA. For offline DPO eval, copy those
+    tensors into the trainer's frozen ``ref`` adapter (e.g. the generator ckpt at train start).
+    """
+    file_by_suffix = _adapter_tensors_by_suffix(_read_adapter_state_dict(ref_adapter_path))
+    copied = 0
+    shape_mismatch = 0
+    no_file_tensor = 0
+    for name, param in peft_model.named_parameters():
+        if "lora_" not in name or ".ref." not in name:
+            continue
+        lookup_suffix = _adapter_param_suffix(name).replace(".ref.", ".default.")
+        file_tensor = file_by_suffix.get(lookup_suffix)
+        if file_tensor is None:
+            no_file_tensor += 1
+            continue
+        if tuple(file_tensor.shape) != tuple(param.shape):
+            shape_mismatch += 1
+            continue
+        param.data.copy_(file_tensor.to(device=param.device, dtype=param.dtype))
+        copied += 1
+    return {
+        "ref_adapter_tensors_copied": copied,
+        "ref_adapter_suffix_no_file": no_file_tensor,
+        "ref_adapter_suffix_shape_mismatch": shape_mismatch,
+    }
+
+
+def _freeze_ref_adapter_for_dpo_eval(model: Any) -> dict[str, int]:
+    """Keep checkpoint ref adapter frozen; policy uses default adapter."""
+    model.eval()
+    for name, param in model.named_parameters():
+        if "lora_" not in name:
+            continue
+        param.requires_grad = ".ref." not in name
+    if hasattr(model, "set_adapter"):
+        try:
+            model.set_adapter("default")
+        except Exception:
+            pass
+    return _count_lora_trainable(model, adapter="ref")
+
+
 def _ensure_dpo_policy_adapter_trainable(model: Any) -> dict[str, dict[str, int]]:
     """
     DPOTrainer clones the loaded adapter into a frozen ``ref`` adapter for reference logps.
