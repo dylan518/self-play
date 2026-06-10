@@ -22,12 +22,8 @@ files = [
     "scripts/slurm_eval_question_dpo_pairs.sbatch",
     "scripts/slurm_eval_question_dpo_holdout_cycle.sbatch",
     "scripts/analyze_dpo_pair_signal.py",
-    "scripts/slurm_qwen35_question_dpo_only.sbatch",
-    "scripts/verify_adapter_load.py",
-    "scripts/slurm_verify_adapter_load.sbatch",
-    "scripts/check_adapter_stack.py",
-    "scripts/slurm_check_adapter_stack.sbatch",
-    "scripts/compare_adapter_ckpt_delta.py",
+    "scripts/measure_pinned_prompt_diversity.py",
+    "scripts/slurm_measure_pinned_bank_diversity.sbatch",
 ]
 lines = ["set -e", f"cd {shlex.quote(os.environ['PROJECT_ROOT'])}"]
 for f in files:
