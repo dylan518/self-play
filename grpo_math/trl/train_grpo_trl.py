@@ -86,7 +86,7 @@ def _make_pairwise_jsonl_dataset(cfg: Dict[str, Any], split: str, max_samples: i
     eval_fraction = float(data_cfg.get("eval_fraction", 0.1))
     eval_fraction = min(max(eval_fraction, 0.0), 0.95)
 
-    questions: List[str] = []
+    questions: List[Dict[str, str]] = []
     seen: set[str] = set()
     with jsonl_path.open("r", encoding="utf-8") as f:
         for raw in f:
@@ -106,7 +106,8 @@ def _make_pairwise_jsonl_dataset(cfg: Dict[str, Any], split: str, max_samples: i
             if key in seen:
                 continue
             seen.add(key)
-            questions.append(q)
+            ref = row.get("reference_answer", row.get("answer_text"))
+            questions.append({"question": q, "answer_text": "" if ref is None else str(ref)})
 
     if not questions:
         raise ValueError(f"No usable questions found in {jsonl_path}")
@@ -125,7 +126,14 @@ def _make_pairwise_jsonl_dataset(cfg: Dict[str, Any], split: str, max_samples: i
     if max_samples is not None:
         selected = selected[: max(0, int(max_samples))]
 
-    rows = [{"prompt": prompt_template.format(question=q), "question": q} for q in selected]
+    rows = [
+        {
+            "prompt": prompt_template.format(question=item["question"]),
+            "question": item["question"],
+            "answer_text": item["answer_text"],
+        }
+        for item in selected
+    ]
     return Dataset.from_list(rows)
 
 
@@ -1119,6 +1127,11 @@ def main() -> None:
         report_to=["wandb"] if wandb_enabled else [],
         run_name=wandb_run_name,
         num_generations=num_generations,
+        # vLLM-backed generation (colocate/server). Off by default (HF generate).
+        use_vllm=bool(cfg["train"].get("use_vllm", False)),
+        vllm_mode=str(cfg["train"].get("vllm_mode", "colocate")),
+        vllm_gpu_memory_utilization=float(cfg["train"].get("vllm_gpu_memory_utilization", 0.3)),
+        vllm_max_model_length=int(cfg["train"].get("vllm_max_model_length", 8192)),
         # Keep eval cheap and avoid divisibility constraints on small world sizes.
         num_generations_eval=1,
         max_completion_length=int(cfg["rollout"]["max_new_tokens"]),

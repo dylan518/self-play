@@ -17,7 +17,7 @@ dist/
 *.egg-info/
 
 # Env
-.env
+.env*
 
 # HF cache (optional: keep if you prefer)
 .cache/

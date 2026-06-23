@@ -1,0 +1,56 @@
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen3.5-9B"
+  torch_dtype: "bfloat16"
+  use_flash_attn: false
+
+data:
+  source: "pairwise_jsonl"
+  jsonl_path: "/mnt/lustre/cornell/ch2263/sp/rh_train.jsonl"
+  split_train: "train"
+  split_eval: "eval"
+  eval_fraction: 0.0
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    Solve the problem step by step, showing your reasoning concisely.
+    End your response with one final line that is exactly:
+    FINAL_ANSWER: <integer>
+
+reward:
+  mode: "correctness"
+  correctness_weight: 1.0
+  format_weight: 0.2
+  answer_boundary_weight: 0.1
+  format_lenient_final_answer: true
+
+rollout:
+  k: 8
+  temperature: 1.1
+  top_p: 0.98
+  max_new_tokens: 2048
+
+train:
+  output_dir: "/mnt/lustre/cornell/ch2263/sp/run"
+  steps: 30
+  prompts_per_step: 32
+  grad_accum_steps: 8
+  lora:
+    enabled: true
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    bias: "none"
+    target_modules: "all-linear"
+  lr: 2.0e-5
+  warmup_steps: 0
+  kl_beta: 0.01
+  gradient_checkpointing: true
+  eval_every: 0
+  save_every: 30
+  wandb:
+    enabled: false

@@ -4,6 +4,275 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-06-23 (later) — ROOT-CAUSE of the blind investigation: rollouts were never logged; fixed for iter3+
+
+**The divergence investigation was crippled because the current run captured no rollout text.** `scripts/iteration_rzero.sh:87` hardcoded `trainer.logger=[console]` with no rollout dump, so for the whole cont run there was *zero* saved prompt/response/score text — the reward service stores only extracted answers, not generations. This silently overrides the standard-experiment-logging discipline (wandb + saved generations), which is why mining iter2's divergence meant reverse-engineering metrics from reward-service jsonl + parquet scraps instead of reading the actual rollouts.
+
+**Fix applied to Brev `iteration_rzero.sh` (backup `.bak_logging`), at the iter2→iter3 boundary while the script was unopened (`fuser` empty; iter2 done rc=0, iter3 not started, launcher in eval phase) — so iter3+ captures everything:**
+- Line 87: `trainer.logger=[console,wandb] trainer.log_val_generations=20`.
+- Questioner launch (L125) + solver launch (L180): each appended `trainer.rollout_data_dir=$STORAGE_PATH/rollout_dumps/${TAG}_{q,s}` and `validation_data_dir=…_val`. Keyed by `${TAG}` (=`${EXP}_it${ITER}_${ARM}`) so questioner/solver/iters never collide.
+- Verified non-no-op: verl `ray_trainer.py:1681-1683` → `_log_rollout_data` → `_dump_generations(inputs, outputs, gts, scores, reward_extra_infos, dump_path)` writes prompt+response+gt+score per step. wandb auth persisted in `~/.netrc` (has `api.wandb.ai`) → no prompt/hang. `bash -n` passes.
+- These are pure logging side-channels: **no change to tokens/n/steps/reward/experiment.**
+
+**Cornell clip80 (977443):** `MAX_ITER=1` (single iter) — no future iteration to patch and can't edit mid-iter1, so its iter1 rollout text is NOT captured this run. Acceptable: clip80's deliverable is the eval numbers (effect of `CLIP_EASY=0.80` on the band), not rollout mining. Cornell verl confirmed to support the same 3 keys; patch staged for any future multi-iter Cornell launch.
+
+**CLAUDE.md:** added "Training launches MUST capture rollouts" section (verify `logger=[console,wandb]` + `rollout_data_dir` + `validation_data_dir`/`log_val_generations` on both Q and S invocations; note the mid-iteration edit hazard).
+
+**CONFIRMED working:** Brev **iter3 started 22:23:50 UTC** (Q=cont_it2_verified_q/gs6, S=cont_it2_verified_s/gs20 — correctly chained from iter2-redo). `rollout_dumps/cont_it3_verified_q/1.jsonl` (548KB) **contains real prompt+response text** (`{"input":"system\nYou are an expert competition-math problem setter..."}`) → logging patch verified live. GPUs 0,1 at 100% (train), 2,3 hold DP reward-service replicas. iter2-redo eval reproduced the original: OlympiadBench **0.325** (orig 0.32), MATH-500 done.
+
+**Cornell clip80 CRASH + fix (job 977443 → 977878):** old job silently crashed at questioner-train with `ImportError: FlashAttention2 ... doesn't seem to be installed` (the Brev A100 flash speed-patch was in the Cornell script, but `~/envs/rzero` has no flash_attn), then continued to the generate stage on the **untrained base questioner** → experiment invalid. Fix: scancel 977443; revert Cornell `iteration_rzero.sh` to `attn_implementation=sdpa` + `use_remove_padding=false` (exact-attention / pure-efficiency, experiment-equivalent; backup `.bak_flashfix`); also applied the logging patch + added `WANDB_API_KEY` to `rzc_env.sh` (Cornell had no wandb auth). Relaunched **977878** (PD, MAX_ITER=1). Cornell compute nodes have internet (HF upload works) so wandb won't hang.
+
+**Overnight monitor (non-destructive):** `/tmp/overnight_monitor2.sh` (bg) — NEVER wipes a Brev checkpoint (the false-restart lesson); stall = all-logs-frozen >20min + GPU idle → ALERT only; auto-resubmits Cornell only if its job vanishes from queue (cap 3); fires on iteration-complete / new-solver-dump / cornell-done/crash. Replaces the destructive `/tmp/overnight_monitor.sh`.
+
+Pending:
+- [ ] Watch iter3 → solver-train stage; confirm `rollout_dumps/cont_it3_verified_s/` populates, then finish divergence analysis on REAL text (band=self-consistency admits uniformly-wrong-but-consistent → all-0.1 reward → zero advantage hypothesis).
+- [ ] Confirm Cornell 977878 clears questioner-train (the prior crash point) once it leaves the queue.
+- [ ] Quantify useful-signal fraction over the 710 iter2 training rows (correct-answer-in-1..4-of-5 = real advantage vs 0/all-5 = none) — pure data mining, no GPU.
+- [ ] iter3/iter4 evals as they complete (OlympiadBench + MATH-500).
+
+---
+
+## 2026-06-23 — iter2 (cont, Q=clip80-questioner) eval results + auto-restart false-positive incident
+
+**iter2 eval (cont run, Q=clip80_it1_verified_q, S=verified-20, DP service, flash+remove_padding, no fla):**
+- OlympiadBench: format_rate 0.995, **acc|fmt 0.322, pass 0.32** (n=200, k=1, 8192 tok) — **REGRESSED vs iter1 verified-20's 41.5%.**
+- MATH-500: format_rate 1.0, **acc|fmt 0.845, pass 0.845** — high.
+- Stage B: 388 in-band, 363/388 = 93.6% program-verifiable, 363 solver rows.
+- Solver step (no fla): **~12.6 min/step** (755s) → ~3.5× over the 44-min baseline; **fla was barely adding anything** (its smoke first-step ~696s) — dropping fla cost ~nothing AND kept the reward service working. Realized cycle ~7h (from ~20h). The OlympiadBench regression is one data point with the clip-lineage questioner seed — revisit whether clip80-trained Q hurts generalization vs base/verified Q.
+
+**INCIDENT — auto-restart false positive lost iter2's checkpoint (~4h recompute).** The overnight monitor's stall detector (idle GPU + main-log frozen, ~8min window) FALSE-tripped during iter2's *benchmark eval*: the eval runs on 1 GPU at intermittent util and writes to `oly_cont.log`/`m500_cont.log`/RUN log, NOT main `cont_verified_it2.log`, so the main log looked frozen. `restart_verified.sh` wiped `cont_it2_*` (resume-hang avoidance) and relaunched iter2 — destroying the just-completed iter2 solver (not yet HF-uploaded; eval ran before the upload step). **Eval numbers survived** (already on oly/m500 logs). Relaunched iter2 recovered and is healthy. **Fix:** stall = max-mtime across ALL pipeline logs (it2/it3/it4 + RUN + oly + m500) AND GPU idle AND ~20min window (5 polls); eval phases no longer false-trip. CLAUDE.md updated; Brev restart count in /tmp/mon_brev_rc.
+
+## 2026-06-23 — Experiment watchdog: cheap-path validated end-to-end on a live run
+
+Building an always-on watchdog so runs stay at max speed and "alive-but-broken" jobs get caught/killed/relaunched without hand-babysitting. Design + all cheap components validated today (full design in memory `experiment-watchdog`).
+
+**Design (user directives):** local laptop loop kept awake with `caffeinate` (started detached, `pkill caffeinate` to stop); FULL autonomy — fix/relaunch AND **kill malfunctioning runs**, bias hard to act ("cost of not acting is larger"), call only when unresolvable. **No fixed action library** — the model gets agency. Models: **DeepSeek** for the frequent health-judge, GPT-5.5/Claude on escalation. Core job is **semantic health diagnosis, not crash detection** — the dominant failure is "a run keeps running while clearly not working" (the concurrency-1 70× defect, flat-reward/no-learning, degenerate output).
+
+**Validated today:**
+- **Alert channel** (`~/Documents/GitHub/persona-companion/alert.py`): places a Vapi call via a TRANSIENT announcer assistant (built-in gpt-4o-mini + the persona's Cartesia voice) — robust to the companion server/tunnel being down. Verified live: clean call, `assistant-said-end-call-phrase`, $0.01. Root cause it "never called" before = laptop asleep (nothing alive) + a Cloudflare 1010 block on urllib's default UA (fixed with a normal User-Agent). See memory `persona-companion-alerts`.
+- **State collector** (read-only ssh): `squeue`/`tmux ls`/`nvidia-smi`/log-tail across Empire, Unity, Brev — works.
+- **DeepSeek judge** (`deepseek-chat`, JSON out): correct on synthetic ("DEAD, throughput far below expected") AND on REAL Brev `iter234` state → HEALTHY 0.9, correctly read GPU1-3 idle as the normal generation phase (not a stall), service at ~5000 tok/s as near-ceiling, zombies as old; emitted watch-condition "step-0 past 40 min → re-check". 601 tokens (~$0.0002).
+
+**Cluster snapshot (06-23 ~06:28):** Brev `iter234` healthy (R-Zero iter2-4 cont, Qwen3.5-4B, step 0/6 in gen+reward phase, reward svc 51% of 2250 prompts @ ~5000 tok/s, GPU0 100%); Empire IDLE (no jobs, stale May tmux — wasted capacity); Unity job 61050175 `rztraino` PENDING; old 36-day defunct VLLM zombies on Brev (harmless).
+
+**Pending:**
+- [ ] Package collect→judge→act into a standing `watchdog.py` + run registry (host/session/log/expectations) + act layer (kill/relaunch over ssh, escalate, `alert.py` when stuck) + `caffeinate`-wrapped loop.
+- [ ] Per-run "what healthy looks like" expectations (most generic: progress, util-vs-ceiling, reward trend, output sanity).
+- [ ] Decide watchdog code home (self-play repo vs standalone).
+
+---
+
+## 2026-06-23 — Speed optimization: solver step 44min→~7-12min; fla broke reward service (root-caused)
+
+Optimized the solver training (the ~14h Stage-C elephant) WITHOUT changing the experiment (user constraint: no token/n/step/reward changes; near-equivalent kernels OK; 15h/iter unacceptable).
+
+**Solver step (batch 256×n5, 4096 max): 44min → ~7-12min.** Breakdown of the win (verl `timing_s`):
+- `use_remove_padding=true` + `attn_implementation=flash_attention_2` (in `iteration_rzero.sh` COMMON_TRAIN): packing eliminates padding-token compute → ~1.8× (44→~24min). flash-attn 2.8.3 installed.
+- `flash-linear-attention` (fla) + `causal-conv1d` kernels for Qwen3.5's 24 linear-attn layers (else torch fallback): another ~2× → `update_actor` 206s vs clip80's ~2560s = **~12×** on the update; first step 696s (incl one-time Triton JIT), steady ~7min.
+
+**BUG (root-caused): fla deadlocks the standalone reward service** (`vllm_service_init/start_vllm_server.py`). With fla installed, the questioner Stage-A reward service hung at `Processed prompts 0/N, 0.00 toks/s`, GPUs idle, whole questioner frozen at step 0/6. Isolated by reverting offload (still hung → not offload) leaving fla as the only change; the service ran fine pre-fla. **Fix: `pip uninstall flash-linear-attention causal-conv1d`.** Service then healthy at **~3,800 toks/s** (batched — also showed the earlier "concurrency-1 / 104 toks/s" was a transient, not a standing problem → the planned A/B reward-batching refactor is likely unnecessary). Trade-off: solver keeps flash+`remove_padding` (~1.8×, ~24min/step) but loses fla's extra ~2×. fla-for-training-only (env-isolated from the service) is a future lever.
+
+**Other config gotchas hit (all in `iteration_rzero.sh`/launcher):** rollout `enforce_eager=false` → CUDA-graph capture fails on A100(cap 8.0)+Qwen3.5+TP2 (`cancelled`) → keep `true`. grad-ckpt off + `ppo_max_token_len=32768` → OOM offload-off → keep grad-ckpt on, `ppo_max_token_len=12288`. **Final working config:** offload-ON (offload-off hangs the questioner handoff), `S_GPU_MEM=0.55`, flash+`remove_padding`, no fla, grad-ckpt on, `ppo_max_token_len=12288`, `enforce_eager=true`. iter234 relaunched 06:09, service healthy. Projected cycle ~4.5-8h (solver-dominated), down from ~20h.
+
+**CLAUDE.md updated** with: "Move fast" (time is binding), "Fast debug loop" (tiny smokes, don't reload vLLM per-change), and "Monitoring cadence + auto-diagnose" (one loop over ALL runs, 60-90s in danger zones, hourly heartbeat when stable, trip-on-STALL = idle GPUs + frozen log ~3min, auto-relaunch). Lesson: a launched job ≠ working; verify progress within ~2-3min; lost ~3h once assuming a smoke trained when it crashed on a deleted parquet.
+
+## 2026-06-22 — PERF: rollout runs at concurrency≈1 (~70× too slow); theoretical optimal cycle ~30min
+
+**Headline:** the self-play loop is generation-bound and running **~70–300× below hardware capability**. Root-caused, benchmarked, and planned the fix.
+
+**Diagnosis (Brev A100-80GB):**
+- verl per-step timing: `gen ~1,820s` vs `update_actor ~80s` → generation is ~95% of every step; FSDP offload is irrelevant (update is tiny). Earlier "~2h update" was the OLD big-batch (256) attempt; current small-batch questioner update is ~80s.
+- Realized throughput ~24–104 tok/s = **single-stream** (reward service logged `output: 104 toks/s`). KV cache had **184× concurrency headroom unused** (1.5M tokens, max_num_seqs 1024) → not batch/cache limited.
+- GPU util by stage: standalone vLLM (`evaluate.py`) + raw benchmark = 100% util; **verl agent-loop training rollout = ~25% util**. So the verl/AgentLoop rollout submits generation at ~concurrency-1, not the hardware.
+- **Localized:** the slowness is the **questioner stage (A) reward path** — solver-scoring of generated questions (n=10 difficulty + verifier). The **solver stage (C) batches fine** (clip80 solver: 1,110 prompts/59s, 100% util) because its reward is a correctness check (no generation).
+
+**Benchmark (raw vLLM, GPU0, Qwen3.5-4B, this exact model):**
+- concurrency 1 → 109 tok/s; 64 → 4,944; 256 → 7,769 (512-tok out).
+- With 2048-tok outputs: conc 256 → 7,034; **512 → 7,305 (peak)**; 1024 → 6,881. → **per-GPU ceiling ~7–7.8k tok/s, plateaus by conc ~256** (decode is memory-bandwidth-bound). DP scales ~linearly: 3 GPU ≈ 21k, 4 GPU ≈ 28k.
+
+**Reward-service internals (`vllm_service_init/start_vllm_server.py`):** solutions = `model.generate(questions, n=10)` (line 179); verifier = SEPARATE `model.generate(code_prompts, n=1)` (lines 289–305). Two sequential calls. `enforce_eager=True` on the service (CUDA graphs off). With `VERIFY_SUBSAMPLE=1.0` both passes cover all questions → can be merged. Verifier Python tool (`question_evaluate/verify.py:144`): `subprocess.run(["python3", tmpfile], timeout=10)` — fresh cold interpreter per program (thread-parallel, no pool).
+
+**Token budget per iteration ≈ 50M decode tokens** (Stage A ~11M, B ~21M, C ~18M); **~70% is the solver scoring questions** (n=10 + n=9). **Theoretical optimal cycle (4×A100, batched+async): ~30 min bf16; ~15–20 min FP8; ~8–10 min if n=10→5.** vs current ~9–10 h → **~15–20× available.** Eval is negligible (~30s at ceiling); updates hide under gen if async; Python tool negligible if pooled. Binding floor = memory-bandwidth-bound decode of those ~50M tokens.
+
+**Fix plan (ordered):** (1) batch the rollout/reward (conc 1→256) — most of the gap; (2) merge solutions+verifier into one `generate()` w/ per-request SamplingParams; (3) `enforce_eager=False` on the service; (4) `N_SERVICES=3` DP across all GPUs (needs offload-during-gen to free training GPUs); (5) async rollout/train overlap; (6) FP8 inference (~2× decode); (7) persistent Python sandbox pool; (8) design lever n=10→5. Validate offline on a free GPU BEFORE baking into a run.
+
+**Decision (user):** let **iter2 (Brev) + clip80 (Cornell) finish** their current iteration and bank results (iter2 = 1,075 in-band / 98.4% verifiable), then **STOP before iter3** (watcher kills tmux iter234 after iter2 HF upload). Unity double-clip stays queued (patch batching in before it starts). Then rebuild the optimized pipeline. Benchmark scripts: `/tmp/vllm_bench.py`, `/tmp/vllm_bench2.py` (Brev).
+
+---
+
+## 2026-06-22 — Launch recovery: iter2-4 continuation (cont) + clip80; Stage-A resume-hang root cause
+
+Brought up the two pending runs the user wanted live before sleeping: **iter2-4 verified continuation** (seeded from verified-20 = `rzcev_it1_verified_s2/global_step_20`, OlympiadBench 41.5%) and **clip80** (CLIP_EASY=0.80).
+
+**Brev iter2-4 hang — ROOT CAUSE = stale-checkpoint resume artifact (not offload, not AgentLoop deadlock).** Two prior relaunches of `iter23_continue.sh` hung in **Stage A** (questioner GRPO). Log evidence: `Found checkpoint .../cont_it2_verified_q/global_step_6` → `Setting global step to 6` → `Resuming from ... global_step_6` → froze (GPU0 100%, no `Processed prompts`, then process exited). An *earlier* attempt had already completed Stage A (step 6) **and** Stage B (the `cont_it2_verified_verl08.parquet` training file existed), so the pipeline works end-to-end on Brev — but on relaunch verl auto-resumes the completed `global_step_6` (= max steps) and deadlocks instead of advancing. My earlier offload-on/off theory was wrong (it hung under both).
+- **Fix:** `rm -rf models/cont_it2_* generated_question/cont_it2_* artifacts/cont_it2_*` (clear the stale checkpoint), relaunch fresh. Verified clean start 17:48 UTC: Stage A launching, `"Resuming from"` count = **0**. Cornell clip80 confirms fresh Stage A works (actively generating at step 0/6). Config: tmux `iter234`, FSDP_OFFLOAD=true S_GPU_MEM=0.55 (reliable-but-slow ~48min/solver-step on A100; offload-off was never the issue).
+
+**Routing decision — Brev over Cornell for iter2-4.** Built `~/iter234_cornell.sbatch` (isolated `STORAGE_PATH=$HOME/rzero_run_cont234` so it can't clobber clip80's shared Vendi bank / temp_results; seeds solver directly from HF `Dylan1631/selfplay-verified-qwen35-4b-iter1-step20`; `--qos=cornell` since `standard` QOS caps at 48h). Submitted (977282) but est. start **2026-06-24** (cornell partition saturated, free GPUs reserved for higher-priority partitions). **Cancelled it** — 2-day wait + it would double-push to the same `selfplay-verified-qwen35-4b-iter{2,3,4}` HF repos as the Brev run. Brev (idle, ours) runs iter2-4 instead; sbatch kept on Cornell as fallback if Brev fails again.
+
+**clip80 on Cornell (job 977116, alphagpu10):** healthy, Stage A questioner step 0/6, reward service generating 860 completions (slow first step, GPU0 100%). FSDP_OFFLOAD=false S_GPU_MEM=0.45. Uploads to `Dylan1631/selfplay-clip80-qwen35-4b-iter1`.
+
+**iter2 progress (Brev):** A→B handoff CLEARED at 21:08 (the historic hang point) — Stage A done (questioner global_step_6), generate produced 998 questions, now band-scoring (3× evaluate.py) → filter → label → Stage C solver. iter2 in-band (in-training reward, 238q): **27.7%** ([0.3,0.8]); 72.3% trivial (≥0.9), 0% too-hard; mean_verified −0.56.
+
+**Pending:**
+- [x] Brev iter2 cleared smoke (questioner step1) + all 6 steps + A→B generate handoff.
+- [ ] Verify Brev iter2 Stage C solver learns → eval → iter3/iter4. (watcher running)
+- [ ] Verify clip80 clears band-filter → label → solver → evals (Cornell 977116, ~4h in).
+- [ ] Collect iter2/3/4 + clip80 olympiad+math500 results; confirm HF uploads.
+
+## 2026-06-22 — Double-clip challenger-reward experiment (Unity, queued)
+
+New reward-shaping experiment on the challenger, patched into Unity's `examples/reward_function/caller_penalty.py` (env-gated behind `DOUBLE_CLIP=1`, compiles clean, inert for other runs):
+1. **Double clip (difficulty):** replace continuous `min(score,1−score)` with a flat band indicator — in-band `[BAND_LO=0.30, BAND_HI=0.80]` → constant `BAND_FLAT=0.5`; outside (too easy OR too hard) → 0. Band matches data filter (`MINSC/MAXSC=0.3/0.8`).
+2. **Stop-update difficulty:** if batch in-band fraction > `BAND_GATE=0.80`, zero the difficulty term for the whole batch.
+3. **Stop-update verifiability:** if batch verifiable fraction > `VERIF_GATE=0.90`, zero the verifiability term — but do NOT flatten verified values (only 0..3/3 resolution). "Verifiable" = graded `verified > VERIF_OK` (0 ⇒ ≥2/3 program agreement).
+Batch md header now logs `inband=.. [GATED] verif=.. [GATED]`. Seeds from base Qwen3.5-4B (sibling to clip80), iters 1–5, per-iter olympiad+math500 evals + HF push `selfplay-doubleclip-qwen35-4b-iter{N}`. Patcher at `/tmp/patch_double_clip.py` (Unity), sbatch `/work/pi_general_dartmouth_edu/dylan/unity_double_clip.sbatch`.
+
+**Compute:** Unity job **61033801**, `-p gpu --gres=gpu:a100:4 --qos=long -t 7-00:00:00 --mem=400G`. The old "Unity too small" failure was a 64G `--mem` cap on the prior hold (`60905723`), not the hardware — uri-gpu001 has 515G RAM; requested 400G. Released the idle 64G hold to free fairshare. All Unity A100 nodes currently full → Slurm est start ~2026-07-01; **user chose to wait in queue** rather than preempt/shrink/run-on-Brev.
+
+---
+
+## 2026-06-22 — Verified arm co-evolution over 3 iterations (rzrun): metrics + generation funnel
+
+Reconstructed the full per-iteration trajectory of the 3-iteration verified run (`rzrun`, Qwen3.5-4B, 06-19/20). Difficulty + diversity recomputed from `artifacts/rzrun_it{1,2,3}_verified/challenger_batches.md` (iter1 filtered to post-23:27 batches to drop ~22 stale appends from an earlier run that polluted the same file); verifiability from the B-stage judge logs; well-posed via GPT-5.5 on the band-filtered judge sets.
+
+| iter | total gen | in-band | band yield | verified (consensus) | solver rows | difficulty (mean consistency, ↓=harder) | diversity (vendi, ↑) | verifiability | well-posed (GPT-5.5) |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 188 | 15 | 8.0% | 9 | 9 | 0.839 | 18.5 | 60% (9/15) | n/a* |
+| 2 | 178 | 12 | 6.7% | 11 | 11 | 0.874 | 33.3 | 92% (11/12) | 67% (8/12) |
+| 3 | 190 | 26 | 13.7% | 15 | 15 | 0.631 | 42.8 | 58% (15/26) | 69% (18/26) |
+
+\*iter1 judge.jsonl + verified.parquet were purged by disk hygiene; only 160-char-truncated questions survive in challenger_batches.md → well-posed not recomputable.
+
+**Trajectories:** diversity ↑↑ (18.5→33.3→42.8, reaching ~50% of MATH-500 golden 85.6); difficulty → harder (consistency 0.84→0.63, in-band yield 8%→14%, solver rows 9→15); well-posed ~stable 67–69%; **verifiability dips hardest at iter3 (58%)**.
+
+**Key findings:**
+- **Co-evolution works**: across iterations the challenger makes questions harder AND more diverse, with ~constant total generation (~185/iter) but ~2× the in-band/usable yield by iter3.
+- **Verifiability is the bottleneck**: the 3-program verifier confirms fewer of the harder iter3 questions (58%); GPT-5.5 says 69% well-posed but only ~38% well-posed AND program-verifiable → good hard questions get discarded. Fix: stronger verifier / GPT-5.5 fallback when programs return None.
+- **Vendi reward worse than BLEU rep_penalty for diversity**: the vendi-reward run (`rzc`, 1 iter) collapsed to vendi 13.9 (~14 modes / 1661 q) — *below* every rzrun iteration — because marginal-novelty-vs-accumulating-bank decays to 0 as the bank fills. rep_penalty (this rzrun) kept diversity rising. Consider reverting to rep_penalty or rewarding absolute (not marginal) diversity.
+- **Difficulty regime is the model, not batch**: Qwen3-4B-Base produces hard questions (band 66%, consistency 0.3, matches R-Zero); Qwen3.5-4B is too strong (band ~19%, consistency ~0.9). Confirmed at step 1 (pre-training), so not a batch-size confound.
+- **Disk purge cost data 3×** (iter1 checkpoints, iter1 judge file, intermediate solvers) → motivated standing practice: always upload to HF (Dylan1631) + per-iter small evals + wandb (entity dylanpwilson2005-dartmouth). See memory.
+
+---
+
+## 2026-06-22 — OlympiadBench (harder, calibrated): verified step-20 = 41.5%, +8.5pp over base, +7pp over majority
+
+MATH-500 was too easy (base 0.79). Re-evaluated on OlympiadBench (zwhe99/simplerl-OlympiadBench, n=200, k=1, max_tokens=8192, format_rate=1.0 everywhere → no truncation, real reasoning). Base = **33.0%**, matching the predicted ~33% → eval harness calibrated.
+
+| arm | acc \| fmt | vs base |
+|---|---|---|
+| base (Qwen3.5-4B) | 0.330 | — |
+| majority (vanilla R-Zero) | 0.345 | +1.5pp |
+| verified step-8 | 0.350 | +2.0pp |
+| **verified step-20** | **0.415** | **+8.5pp** |
+
+**Verified step-20 is the standout: +8.5pp over base, +7pp over majority** (SE≈3.5pp at n=200 → ~2.4σ vs base, likely significant; majority/verified-8 gains within noise). Step-8→20 (0.35→0.415) shows more solver training compounds. Program-consensus labeling beats majority-vote much more clearly on hard problems than on MATH-500 (where it was +3.8pp). Notable: despite easy self-generated questions (band 19%), well-posed+correctly-labeled training still transfers to hard competition math. Eval logs: Brev `/home/nvidia/rzero_run/oly_{v8,v20,maj}.log`, `eval_olympiad.json`. Caveat: k=1, n=200 — a paired/larger-k pass would firm significance.
+
+**Infra:** the CUDA fix (NVCC bypass + lib symlinks + ninja PATH) was ALSO needed on Brev for the 8192-token olympiad shape (fresh flashinfer compile; m500's 4096 ran off warm cache masking the latent skew). Now applied uniformly Brev/Unity/Cornell.
+
+---
+
+## 2026-06-21 — CUDA fix: making the frozen Brev env (vLLM/Qwen3.5) compile on fresh HPC nodes (Unity + Cornell)
+
+Rebuilt envs from `brev_freeze.txt` on Unity & Cornell could `import torch` + `torch.cuda.is_available()` but **vLLM-Qwen3.5 failed at engine init** — the Qwen3.5 hybrid (Gated-DeltaNet) + flashinfer kernels JIT-compile at load and broke. Three distinct causes, all because the fresh nodes have **no system CUDA** (only the pip `cu13` libs, which lack dev symlinks) and a **version-skewed frozen dep set**:
+
+1. **`ninja` not found** (Unity) → `ninja` is in `envs/rzero/bin`; that wasn't on PATH. Fix: prepend `envs/rzero/bin` to PATH.
+2. **"CUDA compiler and CUDA toolkit headers are incompatible"** (both) → frozen set has `nvidia-cuda-nvcc 13.2.78` but `nvidia-cuda-runtime 13.0.96` (CUDART 13.0). flashinfer's bundled CCCL (`cuda/std/__cccl/cuda_toolkit.h:41`) hard-errors on nvcc≠CTK. Fix: `export NVCC_PREPEND_FLAGS="-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK"` (documented escape hatch; same major 13, safe). Also `CUDA_HOME=.../nvidia/cu13` with `cu13/bin` on PATH so nvcc=13.2 is used.
+3. **Linker `cannot find -lcudart` / `-lcuda`** (both) → pip ships `libcudart.so.13` (no unversioned `.so`), no `lib64/`, no `libcuda` stub. Fix (symlinks in `.../nvidia/cu13/`): `ln -sfn lib lib64`; `ln -sf libcudart.so.13 lib/libcudart.so`; `ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so.1 lib/libcuda.so` (driver lib on the GPU node).
+
+**Validated:** Unity `VLLM_GEN_OK` (17×23→391 correct). Brev "worked" only because its flashinfer kernels were pre-cached (mismatch latent). Env files: Unity `/work/pi_general_dartmouth_edu/dylan/unity_env.sh`, Cornell `/mnt/home/ch2263/rzc_env.sh` (both updated). **Both HPC clusters now usable for training + eval.**
+
+---
+
+## 2026-06-21 — GPT-5.5 audit of verified-arm well-posedness: labeling is reliable, degeneracy is the real leak
+
+Adjudicated all **102** program-consensus ("verified", majority_agrees=True) questions from `rzcev_it1_verified_judge.jsonl` with **GPT-5.5** (blind: judged well-posedness + solved independently, no program answer shown), `/tmp/gpt55_judge.py` → `/tmp/gpt55_wellposed.json`.
+
+| metric | result |
+|---|---|
+| well-posed (unambiguous, single answer) | 96/102 = **94%** |
+| labeling correct (consensus == GPT-5.5 answer) | 98/102 = **96%** |
+| degenerate (well-posed but vacuous → 0) | 28/102 = **27%** |
+| well-posed AND non-degenerate (useful) | 69/102 = **68%** |
+
+**Program-consensus labeling is RELIABLE — earlier mislabeling suspicion was wrong.** Cases like `['64','0','0']`/`['9908','0','0']` (I'd flagged as buggy-programs-outvoting-correct) are confirmed by GPT-5.5 to be genuinely 0 (e.g. "no factorial has exactly 5 trailing zeros; v5 jumps 4→6 at 25" → empty set). The `64`/`9908` were the buggy programs; majority-vote MIN_AGREE=2 correctly filtered them. All 4 GPT-vs-program disagreements are cases GPT judged NOT well-posed (returned NONE) — zero cases of program getting a real answer wrong.
+
+**The real leak is DEGENERACY (27%), a verifiability reward-hack.** Vacuous questions (impossible constraints → answer 0) are trivially program-checkable, so they earn the verifiability reward without requiring reasoning. Examples (GPT reasons): "any four integers contain two of same parity → even difference → empty"; "V={0..78}, total 3081 odd → no equal partition → 0"; "three distinct digits ⇒ product 0 but digit-sum positive → empty". Plus ~6% not-well-posed = leaked meta-text ("Wait, re-reading the definition…" — the model's thinking bleeding into the question) or genuine ambiguity (conflicting bounds, ambiguous quantification).
+
+**Implication:** verifiability machinery genuinely works (94% well-posed, 96% correct labels) — the hard part (4B self-generating verifiable questions) is solved. Combined with the flat-difficulty finding, the fix set for the next run is: (1) **non-degeneracy gate** (require non-empty solution set / reject trivial-0), (2) **strip leaked meta-text**, (3) **difficulty-weight fix** (full-scale uncertainty + max(0) floor). Tooling: `gpt-5.5` via OpenAI API (key in `.env`), needs certifi SSL context in detached procs.
+
+---
+
+## 2026-06-21 — Difficulty curve + challenger reward audit: we diverge from the R-Zero PAPER (uncertainty half-scale, no max(0) floor)
+
+**Difficulty reward policy (majority/replication arm, `caller_penalty.py` @ commit 6935d2e):**
+```
+uncertainty = min(score, 1-score)            # score = solver self-consistency ∈[0,1]; tent peaks 0.5; -1 if no question
+penalty     = cluster_share_per_problem(...)  # BLEU-cluster share |C_k|/B ∈[0,1]
+final_score = uncertainty - penalty + verif   # verif=0 for majority; NO max(0,·)
+```
+
+**Difficulty curve (per GRPO step, mean solver self-consistency `score`; from `artifacts/rzrun_it{1,2}_majority/challenger_batches.md`, 256 questions each):**
+- iter1: mean score **0.886**, mean uncertainty ~0.02, band(0.3–0.8) ~10–25%, easy(≥0.9) 74–100%/batch
+- iter2: mean score **0.788**, mean uncertainty ~0.00, band ~10–36%
+- Reward curve (critic/score/mean) it1: −1.08 → −0.48 → … → +0.15. The climb is almost entirely from cutting repetition/format-fails, NOT from raising difficulty. **Difficulty essentially flatlined at "too easy" (~0.8–0.9, far from the 0.5 target).**
+
+**Divergence from the R-Zero PAPER** (arxiv 2508.05004; verified against upstream `caller.py` + paper):
+- Paper: `r_uncertainty = 1 − 2|p̂−½|` (max **1.0**); `r_rep = λ|C_k|/B`, λ=1; `r = max(0, r_uncertainty − r_rep)`.
+- Ours: uncertainty = `min(s,1−s)` (max **0.5** = HALF the paper); penalty = cluster-share λ=1 (matches paper); **no max(0,·) floor** (paper floors at 0).
+- Upstream RELEASED `caller.py` is byte-identical to ours for uncertainty (`min(s,1−s)`) and has **no penalty at all** — i.e. R-Zero's own released code already contradicts their paper.
+- Net: difficulty carries ~½ the weight vs the paper, and the (unfloored) penalty can drive reward negative and invert the signal → optimizer favors de-duplication over hardening. **Root cause of the flat difficulty curve, compounding the strong-base-model issue (Qwen3.5-4B solves challenger questions ~80–90% → uncertainty pinned near 0).**
+- Anomaly to check: `challenger_batches.md` logs `rep_penalty` up to **1.50** though cluster-share ≤1.0 — 06-20 working tree may have had an extra penalty multiplier vs committed λ=1.
+
+**They did NOT release the paper's runs** (checkpoints/datasets/logs go to user `STORAGE_PATH`); only code + reported metrics (+3.7 iter1, +6.49 after 3 iters on Qwen3-**4B-Base**). No reference artifacts to diff against.
+
+**Fix for next run:** switch uncertainty to `1 − 2|p̂−½|`, restore `max(0, unc − penalty)`, confirm penalty λ=1 (cluster-share, not >1), and/or use a colder/weaker band-eval solver so uncertainty has range against the strong base.
+
+---
+
+## 2026-06-21 — ITER-1 EVAL IN HAND: verified (program-consensus) beats base AND majority on MATH-500 (significant)
+
+The iter-1 comparison the run was designed to produce is complete and **positive for the verified arm.** Three MATH-500 evals (06-20 12:35, full test set n=500, k=1, max_tokens=2048, one RESULT each, both checkpoints valid HF models) on Brev `/home/nvidia/rzero_run`:
+
+| Arm | model | format_rate | acc \| formatted | pass |
+|---|---|---|---|---|
+| BASE | Qwen/Qwen3.5-4B | 1.000 | 0.792 | 0.792 |
+| MAJORITY (vanilla R-Zero) | majority_FINAL_solver | 0.998 | 0.808 | 0.806 |
+| **VERIFIED (program-consensus)** | VERIFIED_FINAL_solver/global_step_8/actor/hf | 1.000 | **0.846** | **0.846** |
+
+**format_rate ≈ 1.0 for all three including base** → no truncation on MATH-500 at 2048 tok, so the gain is real accuracy, NOT the format/termination artifact. Verified beats base **+5.4pp** acc and beats majority **+3.8pp** pass; majority's own gain over base (+1.5pp) is marginal (~1 SE).
+
+**Paired significance (McNemar, n=200, same questions, `pp_base.jsonl`/`pp_verified.jsonl` 06-21 07:22):** base 0.780 → verified 0.845, delta **+6.5pp**, both_right=151, both_wrong=26, verified-only-right=18, base-only-right=5, discordant=23, **exact two-sided p=0.0106**. Verified fixes 18 / breaks 5 — a reasoning-improvement pattern, significant at p<0.05.
+
+**Reconciliation with the training-side forensics entry below (same day).** That entry concluded the gradient fed mostly on the format/termination term and the questions were degenerate/easy — true of the *training signal* on it2/it3. But the held-out MATH-500 eval is the ground truth for "does the trained solver reason better," and at format-saturated conditions (base already 1.0 format_rate) it does, significantly. Not contradictory: the reward's format term dominated the *advantage spread*, yet the resulting solver still generalizes to +6.5pp correct reasoning on unseen problems. The verified arm's edge over majority (+3.8pp) is the cleanest signal that program-consensus labeling > majority-vote labeling at iter 1.
+
+**Caveats:** k=1 (single sample/question — some decode variance); verified checkpoint is global_step_8, not the canonical 20. **In flight to strengthen:** (1) Brev `rzcev_it1_verified` re-run training the verified solver to step 20 with the rebalanced vendi/graded-verifiability rewards; (2) Cornell H100 env for a clean both-arm re-run (robust home, no Brev disk/lane traps); (3) majority arm re-run for parity (WashU eval 84230 abandoned — pinned to contended node a100s-2305, node-local checkpoint can't be relocated).
+
+**FAILURE + FIX (06-21 ~19:35): step-20 verified rerun OOM'd at step 4/20.** `torch.OutOfMemoryError` in `ray_trainer._compute_old_log_prob → compute_log_prob → entropy = torch.logsumexp(logits)` — the LM-head logits over a packed micro-batch (`ppo_max_token_len_per_gpu=12288`) × 151k vocab. GPU 0 had 57.6GB in use (vLLM KV from `gpu_memory_utilization=0.7`), only 19.65GB free vs 19.90GB needed — failed by a hair on step 4 (first batch to pack to the full token budget). `save_freq=20` → nothing saved, fell back to base. **Root cause:** vLLM reservation (0.7) + log-prob entropy logits tensor (12288 tok) left no activation headroom — same logits-memory killer noted in the 2026-06-16 TRL entry. **Fix (proven):** `gpu_memory_utilization 0.7→0.55`, `ppo_max_token_len_per_gpu 12288→8192`, `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`. **Relaunched cheaply** as solver-only on the *existing* 108-row parquet (`rzcev_it1_verified_verl08.parquet`) — skips the ~2hr questioner/generate/judge — via `~/rzero_run/rzc_solver2.sh` (tmux `rzc_sv2`, GPUs 0-3, → `models/rzcev_it1_verified_s2`, log `SOLVER2.log`). Same fix baked into the Cornell `rzc_full.sbatch` (would hit the identical OOM on H100-80GB).
+
+---
+
+## 2026-06-21 — Training-side forensics on the verified arm: difficulty / diversity / advantage
+
+Pulled the actual trained artifacts off Brev (`/home/nvidia/rzero_run`) to answer "what difficulty/diversity were the questions, and what % of the learning signal did they carry?" Confirms the null/format-artifact conclusion from the *training* side, not just eval.
+
+**Real trained counts** (the "26"/"35" were judge *candidates*, not the trained set; many judge rows abstained — e.g. `program_outputs=[None,'1024',None]`, only 1/3 programs answered, MIN_AGREE=2 → dropped):
+- it2: 12 judge candidates → **11 questions trained**, 12 GRPO steps
+- it3: 26 judge candidates → **15 questions trained**, 12 GRPO steps
+- it1 verified parquet purged by keep-last-2 cleanup (12 steps in log)
+
+**Difficulty — 2 coarse buckets, lopsided easy.** EVAL_N=4 means band 0.3–0.8 can only admit score 0.5 (2/4) or 0.75 (3/4). it2 `{0.5:2, 0.75:10}` = 83% easy; it3 `{0.5:7, 0.667:1, 0.75:18}` = 69% easy. 0.75 = base solver already gets it 3/4. No genuinely-hard items; difficulty has 2 levels, not a spectrum. Root cause: EVAL_N too small.
+
+**Diversity — ~half degenerate.** Trivial answers (0/1/2/3): it2 6/11 (55%), it3 7/15 (47%); `"0"` alone = 6/15 (40%) in it3. it3 only 10/15 unique answers + one 579-digit degenerate answer. Topics cluster on integer/sum (narrow number-theory phrasing).
+
+**Reward advantage / learning signal** (from `logs/rzrun_verified_it*.log`):
+- last-step reward range = **[0.00, 0.90] every iteration** — floor 0.0 = format reward, ceiling never ~1.0. The gradient feeds on format/termination spread, NOT correct-vs-incorrect reasoning.
+- score/mean ~-0.4 → ~+0.1 (the format term being learned), tiny updates: pg_loss 0.006–0.016, grad_norm ~2, adv spread (max-min) ~2.3–2.6 normalized.
+- **solver `tool_calls/mean = 0.0` at every step** — solver makes zero python-tool calls in training (tool use is verifier-side).
+
+**Conclusion:** ~100% of the run's gradient came from these 11–15 mostly-degenerate questions (nothing else existed), and ~all usable advantage traces to the format/termination term (reward pinned in [0,0.9], base already 3/4-correct), not reasoning. Training-side and eval-side agree: the model learned to format/terminate, not to reason. Reinforces that a trustworthy re-run needs EVAL_N≥10, a well-posedness/non-degeneracy gate, larger NUM_SAMPLES, and reporting acc|formatted.
+
+---
+
 ## 2026-06-16 — TRL reference-check disambiguates "harness bug vs fundamental wall"
 
 ### Why

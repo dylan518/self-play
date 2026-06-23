@@ -1,0 +1,28 @@
+# GSM8K eval config for checkpoints trained with train_agentic_correctness_qwen35.yaml.
+# Same model/prompt as training; data block points at GSM8K for grpo_math.eval.eval_gsm8k.
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen3.5-9B"
+  torch_dtype: "bfloat16"
+  use_flash_attn: true
+
+data:
+  dataset_name: "openai/gsm8k"
+  dataset_config: "main"
+  split_eval: "test"
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    Solve the problem step by step, showing your reasoning concisely.
+    End your response with one final line that is exactly:
+    FINAL_ANSWER: <integer>
+
+rollout:
+  k: 4
+  temperature: 1.1
+  top_p: 0.98
+  max_new_tokens: 1024

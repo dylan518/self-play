@@ -1,0 +1,65 @@
+seed: 1234
+
+model:
+  name_or_path: "Qwen/Qwen3.5-9B"
+  torch_dtype: "bfloat16"
+  use_flash_attn: true
+
+data:
+  source: "pairwise_jsonl"
+  jsonl_path: "outputs/agentic_bank/bank.jsonl"
+  split_train: "train"
+  split_eval: "eval"
+  eval_fraction: 0.1
+
+prompt:
+  template: |
+    Question:
+    {question}
+
+    Solve the problem step by step, showing your reasoning concisely.
+    End your response with one final line that is exactly:
+    FINAL_ANSWER: <integer>
+
+reward:
+  mode: "correctness"
+  correctness_weight: 1.0
+  format_weight: 0.2
+  answer_boundary_weight: 0.1
+  format_lenient_final_answer: true
+
+rollout:
+  k: 8
+  temperature: 1.1
+  top_p: 0.98
+  # Must match the budget the bank's pass rates were calibrated at. Feasible on one
+  # A100-80GB only with micro-batch 1 (fp32 logits buffer is batch x seq x vocab(248k) x 4B).
+  max_new_tokens: 8192
+
+train:
+  output_dir: "outputs/trl_grpo_agentic_correctness_qwen35_9b_8k7g"
+  steps: 60
+  # Micro-batch 1 per rank is the only shape that fits 8192-token backward on A100-80GB
+  # (fp32 logits = batch x seq x 248k-vocab x 4B). 7 ranks x grad_accum 8 = 56 completions
+  # = 7 k=8 question groups per optimizer step.
+  prompts_per_step: 7
+  grad_accum_steps: 8
+  lora:
+    enabled: true
+    r: 8
+    alpha: 16
+    dropout: 0.05
+    bias: "none"
+    target_modules: "all-linear"
+  lr: 1.0e-5
+  warmup_steps: 0
+  kl_beta: 0.01
+  gradient_checkpointing: true
+  eval_every: 0
+  save_every: 10
+  wandb:
+    enabled: true
+    project: "grpo-math"
+    run_name: "trl-grpo-agentic-correctness-qwen35-9b-8k-7gpu"
+  debug_rollouts:
+    enabled: false

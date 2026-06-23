@@ -17,9 +17,9 @@ prompt:
     Question:
     {question}
 
-    Put the final answer first. Your first line must be exactly:
-    FINAL_ANSWER: <final answer>
-    Then include a concise check if useful. Do not write more than 6 lines total.
+    Solve the problem step by step, showing your reasoning concisely.
+    End your response with one final line that is exactly:
+    FINAL_ANSWER: <integer>
 
 reward:
   mode: "verdict"
@@ -49,7 +49,7 @@ rollout:
   k: 4
   temperature: 1.1
   top_p: 0.98
-  max_new_tokens: 384
+  max_new_tokens: 1024
 
 train:
   output_dir: "outputs/trl_grpo_pairwise_verdict_qwen35_9b_external_teacher_overnight"
