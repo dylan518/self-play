@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Architecture reference (read + keep updated)
+
+`ARCHITECTURE.md` at the repo root is the hyper-detailed system reference — every reward formula, answer-parsing regex, the training setup, the R-Zero pipeline, and a **Footguns** section of the silent failures that have corrupted experiments (band=self-consistency-not-correctness, Qwen3.5-vs-Qwen3 base mismatch, eval first-200/multi-answer/budget bugs, the parsing footguns, ignored YAML keys). **Read it before touching rewards, parsing, the band, or the eval.** Regenerate/update it whenever the pipeline changes — stale architecture docs are worse than none.
+
+## BANNED commands (security — never run)
+
+- **NEVER read, cat, grep, tail, or otherwise access `.bash_history`** (`~/.bash_history` or any `*.bash_history`). Accessing it triggers a **CrowdStrike security alert**. If you need a command someone ran, ask or reconstruct it from logs/scripts — do not touch shell history files.
+
+## How to make changes — checklist first, lean infer, preserve invariants (IMPORTANT)
+
+A task is never just the literal task — it carries implied requirements from the project's context and conventions. Do NOT just complete the sentence; do what the user would obviously want.
+
+**1. Always show a checklist before any non-trivial change.** Derive the implied requirements from the surrounding code (e.g. "add a DB" implies schema/structs, migrations, indexes, logging, exception handling, transactions, config, tests). Show this checklist + your chosen defaults so the full scope of the change is visible — never just the literal task. The user reviews it and stops you if something's off.
+
+**2. Lean INFER, don't block.** Build with sensible defaults shown. Only stop and ask on forks that are genuinely ambiguous, expensive to reverse, or change experiment semantics (storage engine, data-model shape, sync vs async, anything touching tokens/n/steps/reward/sampling). Infer the conventional/cheap/reversible items (log the way the repo logs, add error handling, tests). Ask batched and up front, once — never drip questions. Over-asking is as bad as silent regression.
+
+**3. Preserve invariants — flag any change to them LOUDLY, never silently.** After touching any launch/training/eval path, diff against this must-never-break set and report what was touched: (1) wandb logging on (`logger=[console,wandb]`, entity dylanpwilson2005-dartmouth); (2) rollout dumps on (`rollout_data_dir` + `validation_data_dir`); (3) batching/throughput preserved — never drop to concurrency-1 or shrink batch as a side effect; (4) experiment knobs frozen — tokens, n, steps, reward, sampling temp/top_p; (5) seeds set; (6) HF upload (Dylan1631); (7) per-iter MATH-500 + OlympiadBench evals; (8) report format_rate / acc|formatted / pass separately. **Prefer surgical edits over rewrites** — a full "recode the thing" is exactly where wandb/batching die. When a rewrite is unavoidable, enumerate the invariants first, verify each after.
+
+**4. Flag anything that looks wrong, even if unrelated to the current task.** If you notice something broken/risky/suspicious while doing X, surface it — don't pass it by because it's off-topic.
+
 ## Move fast — time is the binding constraint (IMPORTANT)
 
 There is real-world time pressure on this work that the model does not feel intuitively, so make it explicit: **optimize for wall-clock, move as fast as possible.** Concretely:
@@ -43,6 +63,8 @@ Every training launch must log curves to **wandb** AND dump **actual rollout tex
 - `trainer.validation_data_dir=…` + `trainer.log_val_generations=20` — saves eval generations.
 These are pure logging side-channels — zero effect on the experiment (no token/n/step/reward change). Patched into Brev `iteration_rzero.sh` (backup `.bak_logging`); the same edit is staged for any multi-iter Cornell launch. **Caveat:** can't edit `iteration_rzero.sh` mid-iteration (bash re-reads by byte offset → corruption); apply only when `fuser` shows it unopened (between iterations / at a boundary).
 
+**Training rollouts → wandb too (not just disk).** verl natively logs only *validation* generations to wandb (`val/generations` table, gated on `test_freq>0`); training rollouts go to `rollout_data_dir` on disk only. To get the actual TRAINING rollouts into the same wandb run, `verl/trainer/ppo/ray_trainer.py::_log_rollout_data` is patched (backup `.bak_traingen`, on BOTH Brev `~/venvs/rzero2` and Cornell `~/envs/rzero`) to also `wandb.log({"train/generations": wandb.Table(...)})` a 32-row sample per step. The patch is **purely additive and fully guarded** (try/except, no-op unless `wandb` is in `trainer.logger`, never raises) so it's safe on the shared box and for the co-tenant R-Zero `rzv` runs. Editing the `.py` mid-run is safe (unlike bash): a running process already imported it; the next stage/process re-imports the patched version. Full rollout text still lives on disk (`rollout_dumps/`); wandb gets the per-step sample for quick scrubbing via the step slider.
+
 ## Project notes (keep updated)
 
 `PROJECT_NOTES.md` at the repo root is the running experiment log. **At the end of any significant work session** — experiment runs, debugging investigations, root-cause analyses, config changes, training/eval launches — append a dated entry (newest first) covering:
@@ -55,9 +77,23 @@ These are pure logging side-channels — zero effect on the experiment (no token
 
 Read `PROJECT_NOTES.md` at the start of a session when context about prior experiments is needed. Update existing entries' checklists when pending items complete rather than duplicating them.
 
+## Version control: Jujutsu (jj), colocated with git
+
+**This repo uses [Jujutsu (`jj`)](https://github.com/jj-vcs/jj) in colocated mode** (`jj git init --colocate`) — jj and git share the same `.git`, so the remote on GitHub is **plain git**. Collaborators use ordinary `git` and never see jj; `jj git push` writes normal git commits they `git pull` as usual, and `jj git fetch` pulls theirs. jj is a local convenience layer only — **it is fully interoperable with git and does not change what's on the remote.** `git` CLI still works in this repo alongside jj.
+
+Why: research-in-prod is continuous, not block-shaped. jj **auto-snapshots the working copy into the `@` change on every command** — no `git add`/staging, nothing to "save," and `jj undo` reverts any operation. Curate into clean blocks only when sharing/open-sourcing (`jj split`/`jj squash`), never per-iteration.
+
+Day-to-day:
+- Just work — `@` is continuously snapshotted. `jj describe -m "..."` names the current change (can be done after the fact); `jj new` starts a fresh one on top.
+- **Push when you actually want to** (not per-iteration, and not silently — pushing is outward-facing, so confirm first unless told to): `jj bookmark move <branch> --to @-` then `jj git push`. Bookmarks `main` and `simplify-single-integer-no-python` track `origin`.
+- Views: `jj log`, `jj status`, `jj undo`.
+- Identity matches git (`Dylan P Wilson <46631474+dylan518@users.noreply.github.com>`).
+
 ## Compute environment (as of 2026-06-17)
 
 Training has **migrated off the shared Brev A100 box to Empire AI** (Cornell) for dedicated multi-GPU: `ssh empire`, `cornell` partition (8× H100-80GB nodes, 7-day walltime). Env: `~/venvs/selfplay` (Python 3.10.15; torch 2.10/cu128, transformers 5.8.0, vllm 0.19.1, trl 1.4.0 — Qwen3.5 needs transformers 5.x). **Always** `export LD_LIBRARY_PATH=/mnt/home/software/software/Python/3.10.15-system/lib:$LD_LIBRARY_PATH` before using the venv (non-interactive shells don't have the module's libpython). Code at `~/self-play`; scratch `/mnt/lustre/cornell/ch2263`. The Brev box (GPUs 4–7) has been released back to R-Zero. The multi-GPU win is the R-Zero lever: vLLM-backed generation + bigger batch (see PROJECT_NOTES); single-A100 colocate maxed at ~1024 tokens / 16-prompt batch.
+
+**Brev box storage — ALWAYS write artifacts/checkpoints to `/data`, NOT root `/` (IMPORTANT).** Root `/` (`/dev/sda1`) is only **499 GB** and fills fast (checkpoints + conda/venvs + multiple users → repeatedly hits ~97%, risking Ray killing live runs). The real space is on **`/data`** (16 TB raid0 NVMe, ~5 TB free) and **`/mnt`** (2.8 TB, ~2.7 TB free). On Brev set `STORAGE_PATH=/data/<run_name>` and put all artifact/checkpoint/HF-cache dirs on `/data` — never under `~/…` (which is on root). Move existing big run dirs to `/data` and symlink back. (2026-06-23: moved stale `~/rzero_storage` → `/data/rzero_storage` + symlink; live `~/rzero_run` left on root since iter234 is writing it — relocate it on next relaunch.)
 
 ## Evaluation methodology — ALWAYS decompose format vs accuracy (IMPORTANT)
 

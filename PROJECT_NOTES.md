@@ -4,6 +4,62 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-06-24 — clip65 (clipped+verified) LAUNCHED to /data by the watchdog loop
+
+The mission-control `/loop` (assigned 06-23 ~07:25 to launch the clipped+verified run when the Brev lane frees) completed its mission after ~36 iterations / ~18h. iter234 (the verified chain 2→3→4) held the lane all night, then went through a volatile crash/relaunch window (iter4 reward-svc ConnectionError ~02:04, then idle→busy→idle oscillation while the parallel Claude recovered it). The loop correctly **did NOT** grab the lane during those brief/contested gaps. At ~20:45 the lane went **stably idle** (GPUs 0 MiB, recent run exited; only 52-day-old ray zombies left).
+
+**Launched** (tmux `clip65`): `STORAGE_PATH=/data/clip65 FSDP_OFFLOAD=true S_GPU_MEM=0.55 bash ~/rzero_run/chain_clip65.sh` → `R-Zero/scripts/run_rzero.sh` (ARM=verified, CLIP_EASY=0.65, EXP=clip65, MAX_ITER=1, VW=0.75, DW=0.4; NUM_SAMPLES=1000 EVAL_N=9 Q_STEPS=6 S_STEPS=20).
+- **Writes to `/data`** — verified `run_rzero.sh`/`iteration_rzero.sh` honor `STORAGE_PATH=${STORAGE_PATH:-$HOME/rzero_run}`, so the override sends all models/generated_question/artifacts/logs to `/data/clip65` (4.9TB free). Root is only 499G; was 94% full, and chain cleanup freed it to 83%. (See CLAUDE.md Brev `/data` storage rule, added this session.)
+- **Optimized config inherited** — `iteration_rzero.sh` bakes in `attn_implementation=flash_attention_2` + `use_remove_padding=true` + `ppo_max_token_len=12288` + `param/optimizer_offload`. No `fla` installed (it deadlocks the reward service).
+- **VERIFIED advancing**: questioner generated 996/1000 prompts at ~4800 tok/s in / ~2600 tok/s out (batched — not the old concurrency-1). The startup `/hello?name=None` 500 was a one-time probe, NOT the recurring reward-svc crash that hit iter234's iter4.
+- Loop **STOPPED** (mission complete). Earlier in the run, a mid-run disk emergency (root 97%) was resolved by moving stale `~/rzero_storage`→`/data` + symlink.
+
+---
+
+## 2026-06-24 (later) — Band fix A/B: REFUTED at the outcome level. Self-play peaks at iter1; 2nd iter degrades regardless of band.
+
+Isolated A/B: retrained the iter1 solver on the **correctness-variance-filtered** iter2 questions (553 rows, solve-rate-vs-label in (0.2,0.8)) vs broken iter2 (710 rows, self-consistency band). Same input solver, same questions, only the filter differs.
+
+| OlympiadBench full 675 @8k | pass |
+|---|---|
+| base Qwen3.5-4B | 0.573 |
+| iter1 (verified-20) | **0.630** |
+| iter2 broken band (710) | 0.545 |
+| **iter2 fixed cvband (553)** | **0.550** |
+
+**The band fix barely moved the eval (0.545→0.550, within noise); did NOT recover toward iter1.** Training signal DID improve (reward trajectory ended 0.40 vs broken iter2's ~0.30; ~60% mixed-gradient batch vs ~45% dead) — so the fix improved performance *on the self-generated training set* but **did not transfer to the benchmark**. Conclusion: **the band was not the main problem.** A 2nd self-play iteration on a strong Qwen3.5 base degrades below base/iter1 **regardless of question filtering**. The self-generated curriculum isn't aligned with benchmark-improving signal. Real levers are upstream (questioner question quality/distribution, or cap at 1 iteration, or a different curriculum signal) — not a band patch. cvband solver ckpt needed `preprocessor_config.json` copied in for vLLM eval (verl text-only save omits it; now an ARCHITECTURE.md footgun).
+
+---
+
+## 2026-06-24 — OlympiadBench eval audited: the "0.415→0.325 regression" and the "0.63 vs 0.33" were BOTH measurement artifacts; real finding = self-play barely beats base, iter2 < base
+
+**Cancelled all runs** (Brev iter4, Cornell clip80 977878, monitors) per DPW to re-establish the eval baseline. Re-ran OlympiadBench rigorously: **full 675** (not first-200), **all 4 GPUs** data-parallel (`run_oly.sh` + `eval_oly_shard.py`, 4 shards/GPUs 0-3), greedy, grading both `final_answer[0]` and any-answer.
+
+**Two bugs in the original `eval_compare.py`:** (1) `probs[:n]` with `--n 200` → only the **first 200 of 675** problems (unrepresentative, ~20 pts harder); (2) grades vs `final_answer[0]` only → mis-scores the 94/675 multi-answer problems (turned out not to matter here: any>first gained 0).
+
+**Corrected matrix (full 675, 8k, same harness):**
+| model | base gen | format_rate | pass |
+|---|---|---|---|
+| Qwen3.5-4B **base** | qwen3_5 | 1.00 | **0.573** |
+| iter1 verified-20 | qwen3_5 | 1.00 | **0.630** (+0.057 over base) |
+| iter2 cont | qwen3_5 | 1.00 | **0.545** (BELOW base) |
+| R-Zero v5 (jinyuan) | **qwen3** | — | re-eval pending (expect ~0.33) |
+
+**Resolution of the "0.63 can't be right vs external 0.33" suspicion:** NOT an eval bug. `grade_answer` is sane (4≠5, 3≠3.00001, rejects garbage); dataset is the standard 675-problem math OlympiadBench. The skew is the **base model generation** — verified-20 `config.json model_type=qwen3_5` (Qwen3.5-4B, base already 0.573) vs R-Zero v5 `model_type=qwen3` (Qwen3-4B, the external ~0.33). Cross-base comparison is invalid.
+
+**The actual signal (within Qwen3.5, same harness):** self-play adds almost nothing — iter1 = base +5.7 pts, and **iter2 regresses to 0.545, BELOW the 0.573 base** → the training is net-harmful by iter2. This supersedes the earlier "iter1 0.415 → iter2 0.325" framing (both were first-200 numbers; the relative ~8.5-pt regression holds on full set: 0.630→0.545). Ties to the reward-starvation finding (iter2 solver solve_rate 0.336 on its own band-filtered training Qs; ~46% zero-advantage).
+
+**CLOSED — calibration + budget + 2nd-benchmark all confirm:**
+- R-Zero v5 (Qwen3, step_15) on our harness = **0.304** ✓ matches external ~0.33 → harness calibrated; step_20 ckpt was empty (0 safetensors), used step_15.
+- 4k (training budget) matrix: base 0.502 / iter1 0.560 / iter2 0.533 — format_rate=1.0 at 4k too (zero truncation), so 8k didn't cause a format problem; budget only buys reasoning room (8k > 4k by ~5-7 pts for the verbose Qwen3.5 models, ~0 for concise Qwen3 v5). iter2 gains least from extra budget (it learned shorter responses).
+- **MATH-500 robustness (full 500, 4k):** base 0.858 / iter1 **0.884** / iter2 0.864 → regression iter1>iter2 holds on a 2nd benchmark.
+
+**FINAL VERDICT:** iter1 > iter2 on EVERY benchmark × budget (Oly 8k 0.630>0.545; Oly 4k 0.560>0.533; M500 0.884>0.864). Self-play peaks at iter1 (+2.6 to +5.8 over base) then **declines at iter2**, landing ~base. Not sustained improvement on the strong Qwen3.5 base. Eval was never the issue (calibrated). The fix lever = challenger/band → solver **correctness-variance vs program label** (solve-rate in (0.2,0.8)), inserted after `judge.py` in Stage B (have evaluate answer-dists + judge `verified_answer` to compute it). DESIGNED + launch-ready, NOT launched — strategic call (patch band vs rethink approach/base) escalated to DPW.
+
+Eval artifacts on Brev `/data/selfplay/`: `oly_*_shard*.jsonl` (per-problem text+grade), `agg.py`, `run_oly.sh`/`eval_oly_shard.py` (4-GPU sharded full-675 OlympiadBench), `run_math500.sh`. All runs cancelled, GPUs idle.
+
+---
+
 ## 2026-06-23 (later) — ROOT-CAUSE of the blind investigation: rollouts were never logged; fixed for iter3+
 
 **The divergence investigation was crippled because the current run captured no rollout text.** `scripts/iteration_rzero.sh:87` hardcoded `trainer.logger=[console]` with no rollout dump, so for the whole cont run there was *zero* saved prompt/response/score text — the reward service stores only extracted answers, not generations. This silently overrides the standard-experiment-logging discipline (wandb + saved generations), which is why mining iter2's divergence meant reverse-engineering metrics from reward-service jsonl + parquet scraps instead of reading the actual rollouts.
@@ -24,8 +80,28 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 **Overnight monitor (non-destructive):** `/tmp/overnight_monitor2.sh` (bg) — NEVER wipes a Brev checkpoint (the false-restart lesson); stall = all-logs-frozen >20min + GPU idle → ALERT only; auto-resubmits Cornell only if its job vanishes from queue (cap 3); fires on iteration-complete / new-solver-dump / cornell-done/crash. Replaces the destructive `/tmp/overnight_monitor.sh`.
 
+**CORRECTED divergence analysis (data-driven, from training logs — supersedes the length/curtailment story):**
+- iter1 solver (`SOLVER2.log`, produced `rzcev_it1_verified_s2`): reward `critic/score/mean` **0.57→0.79 (rising)**, length 2967→1995 (stable) → OlympiadBench **0.415**.
+- iter2 solver (`cont_verified_it2.log`): reward **0.29→0.16→0.30 (never >0.30)**, length 3382→1725→2915 (U, recovers) → OlympiadBench **0.325**.
+- **Length was a RED HERRING:** solver length recovered to ~2900/4096 and eval format_rate=1.0 — no truncation. The regression is genuine reasoning degradation, NOT curtailment. (I was wrong to lean on shortening.)
+- **Real cause = reward starvation / curriculum runaway:** iter2 trained the solver on questions it got right only ~16–30% of the time (2.5–4× lower reward than iter1). Difference is the **input questioner**: iter1=base Qwen3.5-4B → solvable questions; iter2=clip80-lineage *trained* questioner (`clip80_it1_verified_q`) → GRPO-pushed toward harder/uncertain questions. The **self-consistency band (0.3–0.8) does NOT cap difficulty by correctness** — a confidently-but-consistently-WRONG question passes the band yet yields low reward. So difficulty ran away ("gone too far the other way", as DPW called it) and degraded general reasoning.
+- **`enable_thinking=false` is NOT the cause:** confirmed present in iter1 too (`SOLVER2.log:567 apply_chat_template_kwargs:{enable_thinking:False}`) — it's a constant. The questioner generates short (~100-tok) blind problems with often-wrong self-`\boxed{}` answers (e.g. "n²+n prime, 1≤n≤100" → true answer 1, questioner said 7) in BOTH iters; the solver still reasons (2–3k-tok CoT in body, thinking-tags off). Note: `scripts/iteration_rzero.sh` is **not git-tracked** (local working file), so no commit history to diff iter1 vs iter2 — logs are the only record, and configs match.
+- Core fix (next experiment): challenger/band should target **solver correctness-variance vs the label** (solve-rate strictly in (0,1)), keeping reward in iter1's learnable 0.5–0.8 zone. Optional/experiment-altering: `enable_thinking=true` for questioner so it verifies its own problems.
+
+**Storage moved to /data (16 TB) + root-disk relief (Brev):** root `/dev/root` (484 G) spiked to 96% (Ray `file_system_monitor` warned "Object creation will fail if spilling required", 18 G free) during questioner ckpt-save + Ray spill. Fixes: (1) `rollout_dumps/` → `/data/selfplay/rollout_dumps` with symlink `~/rzero_run/rollout_dumps → /data/...` so the LIVE writer + all future iters store to /data transparently (per DPW "always store rollouts in /data"); (2) moved 2 idle checkpoints (`rzcev_it1_verified_s2`, `clip80_it1_verified_q`, ~34 G, 0 open handles) → `/data/selfplay/models_archive/` + symlinks (no loss). Root now 80% / 102 G free. `/data` = 16 T, 5 T free, shared (langlin 7.6 T, jinyuan/R-Zero-hedge 3.1 T — do not touch). Monitor `/tmp/overnight_monitor2.sh` now also alerts at root ≥93%. **TODO at iter3→iter4 boundary:** edit `iteration_rzero.sh` so `default_local_dir`/`rollout_data_dir` point directly at `/data` (model ckpts still write to root; ~34 G/iter, fine through iter3, relocate for iter4).
+
+**INCIDENT (self-inflicted) — recon on GPU 0 killed iter3 Stage C solver training.** Ran a standalone iter2-vs-iter1 solver reconstruction on Brev **GPU 0** (in the live pipeline's lane). When iter3 reached **Stage C (solver-train, needs all 4 GPUs incl. GPU 0)**, vLLM failed: `Free memory on cuda:0 (27/79 GiB) < desired (43.59 GiB)` — my recon held ~51 GB. iter3 Stage C **crashed**, the launcher advanced to **iter4 with the STALE iter2 solver** (`S=cont_it2_verified_s` — iter3's solver update was lost; questioner did advance to `cont_it3_verified_q`). Fix: killed recon → GPU 0 freed → **iter4 recovered and is healthy** (Stage A, 0 errors, wandb run `tvb…`). **Net loss: iter3 solver checkpoint (`cont_it3_verified_s`) never produced.** **LESSON: never run a standalone job on a GPU the active pipeline needs** — GPU 0 was in-lane; the Stage A service AND Stage C training both use it. Recon results that DID survive: `recon_it2_solver.jsonl` (iter2 solver on its 710 training questions, **solve_rate 0.336** — i.e. iter2 solver gets only ~34% of its own band-filtered training questions right vs the program label, consistent with the reward-starvation story). iter1 recon was killed mid-run (16%).
+- Recovery option (experiment-semantics call for DPW): re-run iter3 Stage C standalone (have all inputs: `cont_it3_verified_verl08.parquet` + `cont_it2` solver) to recover `cont_it3_verified_s`, OR accept the solver chain as iter2→iter4 (skipped one update). Needs 4 GPUs — run after iter4 or when Cornell frees.
+
+**Solver rollouts NOW available (DISK) — answer to "do we have them / on wandb":**
+- `/data/selfplay/solver_eval_dumps/cont_it3_verified_{0,1,2}.jsonl` (~240 MB) — the Stage-B evaluate dump (my evaluate.py patch): iter2 solver's FULL solutions (n=9) on ~9000 iter3-generated questions. **DISK only** (eval script, not a wandb run).
+- `/data/selfplay/recon_it2_solver.jsonl` — iter2 solver on 710 iter2 training Qs, full text + solve_rate 0.336. **DISK only** (standalone inference).
+- wandb has questioner curves (`px6nrabx` it3-q, `tvb…` it4-q) but **NO solver `train/generations`** yet — iter3 Stage C (which would have logged them) failed; iter4's Stage C will log them when it gets there.
+
 Pending:
-- [ ] Watch iter3 → solver-train stage; confirm `rollout_dumps/cont_it3_verified_s/` populates, then finish divergence analysis on REAL text (band=self-consistency admits uniformly-wrong-but-consistent → all-0.1 reward → zero advantage hypothesis).
+- [ ] DECISION: recover iter3 solver (re-run Stage C) vs accept iter2→iter4 chain.
+- [ ] Watch iter4 → solver-train stage; confirm `rollout_dumps/cont_it4_verified_s/` populates (now on /data) + wandb `train/generations`, then finish divergence analysis on REAL solver text.
+- [ ] At iter3→iter4 boundary: point model `default_local_dir` to /data in `iteration_rzero.sh` (root disk would tighten by iter4).
 - [ ] Confirm Cornell 977878 clears questioner-train (the prior crash point) once it leaves the queue.
 - [ ] Quantify useful-signal fraction over the 710 iter2 training rows (correct-answer-in-1..4-of-5 = real advantage vs 0/all-5 = none) — pure data mining, no GPU.
 - [ ] iter3/iter4 evals as they complete (OlympiadBench + MATH-500).
