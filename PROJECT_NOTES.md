@@ -4,6 +4,371 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-01 — DESIGN PIVOT: all-SFT single-shot; the diverse-verifiable set = VERIFY THE BASE ROLLOUTS (never done before).
+
+**Key realization (DPW):** every `judge.jsonl` verified set (2292 total, only **355 unique** — 85% degenerate digit dupes) is from TRAINED (collapsed) questioners' Stage-B output. **The base questioner's diverse questions (Vendi ~20) were NEVER verified** — they only exist as unlabeled training-step rollouts. So all diversity experiments trained ON collapsed curricula; we've never had a diverse VERIFIED curriculum.
+
+**But the diverse data is already on disk:** base questioner step-1 rollouts across all runs = 2640 raw, **853 unique**; +step-2 → **1655 unique** (diverse, Vendi ~20, unverified). Verifying these (one pass, ~25% yield → ~400 diverse-verifiable) gives the diverse-verified set we've been missing — no new generation needed. Job 981629 queued (verify all 1655, K=5, SKIP_BAND) → `base_diverse_verify_out.jsonl`.
+
+**Anti-collapse design converged this session (survivorship/Goodhart is the root cause):**
+- **Break the iteration** — single-shot, not iterated loop (loop compounds selection bias to degenerate extreme).
+- **SFT the QUESTIONER** on a diversity-curated verified set (NOT raw — raw is 85% dupes → clones monoculture). SFT = distribution-matching, not proxy-max → no Goodhart collapse. Source = verified-BASE rollouts (diverse), not reused collapsed curricula.
+- **SFT the SOLVER** via rejection sampling (STaR/RFT): sample K solutions, keep correct-vs-verified-label, SFT. Difficulty self-filters → **band-eval redundant** (drop it — it was the un-schedulable expensive stage).
+- ⇒ **all-SFT self-improvement loop: no RL anywhere** → no Goodhart, no reward-hacking, no KL-tuning, no collapse. Recipe: verify-base → SFT-questioner (diverse target) → generate → verify once (K≈10 de-noised) → rejection-SFT solver → eval. ~3h compute on 4×H100 (no band-eval).
+- Consistency (analytical, calibrated to 86%-3/3): repeat verifiability of SURVIVORS ~95% (mild) — but that's survivorship; real churn is in filtered-out borderline Qs. ⇒ collapse is driven by iterated reward/selection RATCHET, not per-pass noise → **policy fix (fixed-ref KL / SFT-to-diverse-distribution) > de-noising**.
+
+**COMPUTE BLOCKER:** Empire `cornell` saturated (4-7day jobs); ALL diagnostic jobs (even 15-30min) pending 2h+ on Priority, not backfilling. Need a quieter window or reservation for the ~3h run. Unity (`ssh unity`) is a fallback but needs env setup.
+
+---
+
+## 2026-06-30 — ROOT-CAUSE (DPW): collapse = Goodhart/optimizer's-curse on a NOISY verifiability proxy. Fix = GATE not grade.
+
+**The fundamental issue (DPW's insight):** verifiability & difficulty are NON-DETERMINISTIC (3 programs @temp0.6; band from n stochastic solver samples). The pipeline FILTERS and REWARDS on these noisy estimates → selection-on-noise → iterating marches to the degenerate EXTREME (maximally-verifiable = trivially-programmable = digit monoculture), not the target (good diverse Qs). Maximal measured verifiability selects AGAINST interesting Qs (which admit multiple program approaches that disagree on edges).
+
+**Confirmed in data (divfix verified, 3/3 vs 2/3):** distinct-prefix ratio **3/3=0.14 vs 2/3=0.35** (the max-verifiable set is 2.5× MORE monoculture); digit-mention 77% vs 67%. ⇒ **the diversity lives in the 2/3 (borderline) region; the pipeline prefers the degenerate 3/3.**
+
+**Precise mechanism = the reward is GRADED:** `v = 2·votes/3 − 1` → 2/3 gives +0.33 but 3/3 gives +1.0. The questioner is paid **3× more for a degenerate 3/3 question than a diverse 2/3 one** → exact gradient to the extreme.
+
+**FIX (unifies the session's threads):** (1) **Gate, don't grade** — binary verify reward: verified(≥2/3) → same reward regardless of 2/3 vs 3/3, removing the 2/3→3/3 gradient. (2) **De-noise** the estimate (K=5–7 programs, more band samples) so the filter selects less on luck. (3) **Don't compound** — fresh generation/streaming ("each question once") breaks the iterative march. (4) **Sample representatively** across the verifiable spectrum, not the max tail. **Through-line: use verifiability & difficulty as GATES (pass/fail), NEVER as continuous rewards to maximize** — maximizing a noisy proxy → Goodhart → degenerate extreme. Same principle as the band=self-consistency footgun (CVBAND) but for verifiability.
+
+---
+
+## 2026-06-30 — MAJOR REFRAME: the questioner HELD diversity; the BAND+VERIFY FILTER destroys it. (Vendi-per-step, not reward.)
+
+**Vendi SCORE per questioner step (absolute diversity via all-MiniLM + Nystrom, NOT the marginal-novelty reward):**
+```
+step:    1     2     3     4     5     6
+nopack: 22.0  21.0  16.6  10.4   8.1   6.2   <- steep collapse
+divfix: 21.2  19.9  19.9  20.6  19.9  17.0   <- HOLDS ~20 (z-scoring worked)
+```
+The diversity REWARD (→0.0014 both) was MISLEADING — it's marginal novelty vs a saturating bank, not actual diversity. Real Vendi: **divfix barely collapsed (held ~20 ≈ base 21); only nopack collapsed (22→6).** REWARD_FIXEDPCT z-scoring genuinely held the questioner's diversity.
+
+**CORRECTED (was: "filter destroys half the diversity" — that was an n-mismatch artifact).** Comparing Vendi at MATCHED n (=400, since Vendi grows with n) across filter stages:
+```
+                       nopack Vendi(m400)   divfix Vendi(m400)
+0 generated (Stage B)      2.85                15.87
+1 after BAND [0.3-0.8]     2.87                14.76  (-7%)
+2 after VERIFY (curric)    2.85                13.20  (-11%)
+```
+⇒ **NEITHER filter is the diversity sink** — BAND and VERIFY each remove only ~7-11% (verify slightly more). The curriculum (13.2) ≈ what the questioner GENERATED (15.9). **Diversity is decided at GENERATION by the trained questioner**, not by the filters. The old "20→9.93 = half lost" compared per-step n=240 (~20) to a curriculum measured at n=65 (~9.93) — a sample-size artifact, not filtering.
+
+**Net (strengthened):** divfix's curriculum is genuinely **~4.6× more diverse than nopack's** (matched-n 13.2 vs 2.85) — even MORE than the old n=65 "3×" (9.93 vs 3.3) implied — and STILL tied on eval (0.6326 vs 0.6415). So the conclusion is stronger: a 4.6×-diverse curriculum doesn't move the eval (verifier-expressiveness ceiling = still enumerate→integer skill), and the tie remains confounded by nopack's 2× data + cleaner labels. z-scoring DID give a diverse curriculum; the filter was never the problem. Lever is NOT the filter and NOT questioner-reward — it's verifier EXPRESSIVENESS (what skills can be certified) + the confounded matched-size control.
+
+**Per-step in-band + verification-agreement** measured faithfully on Empire (job 981609: band-eval n=9@8192 + Qwen3.5-4B verifier over all 1697 per-step Qs, both runs) — pending GPU. Local tooling: `/tmp/vendi_perstep.py` (Vendi/step), `~/Desktop/perstep_verify_input.json`.
+
+---
+
+## 2026-06-30 — THREE-WAY correctly-labeled measurement (110-agent parallel workflow): RL trades diversity for cleanliness (same gradient). "Clean AND diverse" unreachable.
+
+**Method:** 110 independent verifier-agents (1 per question, parallel workflow `wuh1gaiuu`, 2.4M tok, ~9min), each wrote+ran its own Python brute-force BLIND to the program label; compared to labels after. Artifacts `~/Desktop/vresults/`, `*_blind_sample.json`, `*_sample_key.json`.
+
+| | base questioner PRE-RL | divfix post-RL | nopack post-RL |
+|---|---|---|---|
+| Vendi | ~18.7 | 9.93 | 3.3 |
+| well-posed | **74%** (37/50) | ~89% | ~92% |
+| correctly labeled (indep vs program label) | n/a (never verified) | **92%** (55/60) | **98%** (59/60) |
+| of 3/3 unanimous correct | — | 92% (48/52) | 98% |
+| of 2/3 correct | — | 88% (7/8) | — |
+| verifiable (<30s brute-force) | 92% | — | — |
+| well-posed AND verifiable (label ceiling) | **74%** | — | — |
+
+**Findings:** (1) **The diverse end is the DIRTY end** — pre-RL questioner is Vendi 18.7 but only 74% well-posed; the varied questions (cubics, bounded-coeff polynomials, factorial-digit) are phrased most ambiguously. (2) **RL cleans the questioner (74%→92% well-posed, →98% correct labels) ONLY by collapsing to the digit monoculture** (Vendi 18.7→3.3). Mode-collapse and quality-improvement are the SAME gradient — the verifiability+band reward selects the verifiable-easy corner (digit-7), which is low-diversity by construction. (3) Even divfix 3/3-unanimous labels are only 92% correct (vs nopack 98%); its errors concentrate in genuinely ambiguous/self-contradictory Qs where 3 programs SHARED a misreading. **Conclusion: "clean AND diverse" is unreachable from this questioner** — diverse(74% clean) XOR clean(92%, monoculture). This is THE reason every curriculum evals ~0.63 regardless of the diversity knob. Reinforces: don't iterate on the diversity reward; the binding constraint is verifier expressiveness (only brute-forceable Qs survive → enumerate→integer skill only).
+
+---
+
+## 2026-06-30 — BOTH curricula are monocultures; "diversity" = surface wording, not skill. Base label-correctness measured 98% (n=60 blind).
+
+**Base/nopack is an even TIGHTER monoculture than divfix** (structural analysis of 943 verified Qs): 100% mention "digit", **90% constrain digit '7'**, **97% identical template** "Let S = set of integers n, 1≤n≤N, [contains digit 7]; apply f(n); sum." Only 3 axes vary: N∈{1000,2023,2024}, the digit condition (almost always 7, sometimes 7+x), f∈{digit-sum 49%, count, product, #digits}. ⇒ essentially ONE problem re-rolled 943×. Vendi 3.3 confirms.
+
+**Crux finding:** the questioner mode-collapses in BOTH runs; the diversity reward only changed WHICH monoculture (and surface wording: Vendi 3.3→9.9) — never the underlying skill (bounded enumeration→one integer), because the **program-verifier only passes brute-forceable problems** (geometry=0 in divfix, no proofs/open-reasoning survive). So Vendi (embedding/wording metric) moved while reasoning-skill stayed fixed → eval pinned ~0.63 regardless (base 0.6415 / divfix 0.6326, a tie). **Diversity-as-measured is real; diversity-as-skill is not.** This is why the diversity lever never moved the eval.
+
+**Base label correctness MEASURED (independent blind brute-force re-solve, subagent wrote+ran Python, n=60 random 3/3, blind to labels):** 59/60 = **98% correct** (95% CI ~91–99.7%); 0/60 flagged ambiguous. The 1 error (idx 49): question asks "number of elements in the SET of pairs (n,d)" with d=f(n) deterministic → correct=|S|=54, but all 3 programs shared a misreading and computed sum-of-d=154. ⇒ base label-error mode is NOT arithmetic — it's 3 programs sharing a misread of an unusually-phrased Q (rare, ~2%). Combined w/ ~92% well-posed (gpt-5.5, 46/50) → base ≈ **~90% well-formed AND correctly labeled**. Artifacts: `~/Desktop/nopack_{blind_sample,sample_key,independent_answers}.json`, `~/Desktop/divfix_examples_by_topic.md`.
+
+---
+
+## 2026-06-30 — WHY diverse(divfix 0.6326) didn't beat digit-monoculture(nopack 0.6415): it's a TIE confounded by curriculum size + label noise, NOT a diversity verdict.
+
+**First: 0.6326 vs 0.6415 is within noise.** ~6 Qs / 675; SE at p≈0.63,n=675 is ~1.9pp ≫ the 0.9pp gap. digit/vfix/divfix (0.6415/0.6296/0.6326) are a 3-way statistical tie. Headline = "diversity didn't HELP," not "it hurt."
+
+**Mechanism (from judge.jsonl consensus-strength analysis, staged locally + WashU/HF):**
+| | nopack/digit | divfix/diverse |
+|---|---|---|
+| judged | 946 | 534 |
+| verified (got label) | 943 (100%) | 479 (90%) |
+| 3/3 unanimous (gold) | 929 (99%) | 407 (85%) |
+| 2/3 consensus (shaky) | 14 (1%) | 72 (15%) |
+
+Three confounds, all favoring the monoculture: (1) **noisier reward** — digit labels 99% gold vs diverse 85% unanimous, **15× more 2/3 labels** (RL is sensitive to label noise; dirty labels push policy wrong); consistent w/ gpt-validation 89% (divfix) vs 92% (nopack) well-posed. (2) **~half the data** — 479 vs 943 verified rows (diverse Qs harder to program-verify → more culled). (3) **verifiability filter partially undoes diversity** — only 90% of diverse Qs labeled (vs 100%), survivors skew to verifiable/digit-like tail. ⇒ monoculture wins on signal-cleanliness what it loses on breadth; tie at ~0.63. **This run does NOT isolate diversity** (confounded w/ size+noise).
+
+**Sharper follow-up experiment (cheaper than another iter1, reuses existing curricula on HF/WashU):** keep only the **407 unanimous(3/3) diverse** Qs, subsample digit to 407, so diversity is the ONLY variable. clean-diverse-407 vs clean-digit-407 → if tie, diversity genuinely doesn't matter here; if diverse pulls ahead, noise was masking a real effect.
+
+**Resume compute:** WashU is NOT a training home (borrowed `jiaxinh` acct, home quota full 29.6/30GB, GPU submit blocked: `spank-auks` cred fail + needs `-A engr-lab-<PI>`). **Empire AI (Cornell) is the home** — own acct, `~/venvs/selfplay`+`~/self-play` present, `cornell` H100 partition has free nodes. Pull curricula/models from HF+WashU.
+
+---
+
+## 2026-06-30 — divfix COMPLETED (eval 0.6326); this run drew Vendi 9.93 (moderate), NOT 22. Pre-shutdown preservation + auto-sync set up.
+
+**divfix result: `RESULT_divfix_it1_8k` n=675 format_rate=1.0000 acc|fmt=0.6326 pass=0.6326** (mean_resp 6984 chars, ~0 truncated). Curriculum: 479 verified rows, **92% well-posed**, **Vendi 9.93** — i.e. THIS run drew a *moderate*-diversity curriculum, not the 21.7 favorable draw. Questioner still collapsed (dom-topic 32→68% over 6 steps) despite REWARD_FIXEDPCT z-scoring + VENDI_GOLDEN=0 (no gate), NO clip.
+
+**Updated eval scoreboard (Oly-675 @8192 greedy):** base 0.573 · nopack/digit (Vendi 3.3) **0.6415** · vfix (Vendi 4.68) 0.6296 · **divfix (Vendi 9.93) 0.6326**. ⇒ Across Vendi 3.3→9.93 the eval sits flat at ~0.63; moderate diversity does NOT move it off the digit baseline. The Vendi-22 end is STILL untested (no completed run ever trained on it — diversity-hold is a non-deterministic lottery: same divfix config drew 21.7 vs 9.93 vs collapsed; well-posedness ~92% is the reliable part, diversity is the draw).
+
+**Preservation (Brev box shuts down ~9am PDT 2026-06-30):**
+- divfix solver → HF `Dylan1631/sp-divfix-solver-oly0p6326`; rollouts → HF dataset `selfplay-rollouts-analysis-backup/selfplay_divfix_rollouts.tar.gz`; rollout text → WashU `/home/compute/jiaxinh/selfplay_live/selfplay_divfix/`.
+- **Auto-sync loop** (local `~/Desktop/sync_rollouts_to_washu.sh`, pid running, 15-min cycles, Brev→local→WashU; rollout text only, weights excluded → HF-only). Log `~/Desktop/sync_rollouts_to_washu.log`. WashU dest `/home/compute/jiaxinh/selfplay_live/`.
+- **8am pre-shutdown verification** = one-shot session cron (fires 7:56 PDT): confirms sync alive, diffs WashU vs Brev counts, confirms 3 WashU tars + HF models/dataset + wandb, rescues anything Brev-only. ⚠️ session-only — dies if Claude session closes; caffeinate keeping Mac awake.
+- HF write token = Dylan1631 fineGrained in **local repo `.env`** (`hf_rIy…`). Note: `/home/nvidia/self-play/.env` token is Dylan1631 **read-only**; Brev cached `~/.cache/huggingface/token` = different account `shrango` (write). Use the local-repo token for Dylan1631 writes.
+
+---
+
+## 2026-06-29 (late) — divfix relaunched to completion (THE clean-diverse test); vfix curriculum Vendi=4.68 (collapsed≈digit)
+
+**Vendi scoreboard (matched n=65):** nopack digit 3.3 (eval 0.6415) · vfix curriculum 4.68 (eval 0.6296, COLLAPSED — barely above digit) · divfix verified curriculum 21.7 (UNTESTED). So every COMPLETED run trained on a ~monoculture (Vendi 3-5 → ~0.63); we have ZERO eval at the diverse end (Vendi ~22).
+
+**Iter-time breakdown (from vfix end-to-end, ~10.7h total):** Stage A questioner 2.0h (18%) · Stage B generate+band-eval+judge 3.0h (28%, but judge itself ~3min — the rest is solver band-sampling) · **Stage C solver-train 5.6h (52%)** · eval ~10min. ⇒ ~80% of wall-clock is the SOLVER (train + band-sampling), only ~18% the questioner. The band-eval (~2.9h sampling solver n=9 ×1000 Qs, then discarded) is the biggest throwaway-cost optimization target.
+
+**Verification deep-dive (DPW pushed on the low verifiable rate):** the '10% verifiable' was a THRESHOLD ARTIFACT — I used VERIF_MIN=0.34 which counts only 3/3-unanimous (verified=1.0); the 2/3-consensus (verified=0.333, passes MIN_AGREE=2, gets a label) were excluded. Real rate ~24% (verified>0). **My REWARD_CLIP VERIF_MIN=0.34 was therefore an over-strict BUG (should be ≤0.33) — contributed to vfix/divclip collapse.** Inspected no-consensus rollouts (programs run 99%, not crashes): failures are ~25% simple-but-buggy programs (base-4B miscodes, e.g. 3 diff answers incl 0 on a trivial digit∩digit-sum Q), ~40% genuinely hard (iterated σ-sequences, factorial-trailing-zeros → error/timeout), ~25% ambiguous/garbage Qs (rambling word-letter spec), few non-integer answers. Lever for more verifiable-diverse Qs = stronger judge/coder or more programs (K=3→5-7), NOT parsing. Program SOURCE not saved by pipeline (verify.py writes temp file, deletes); only parsed program_outputs in judge.jsonl. Qwen3.5 self-critique (SELF_FILTER) catches only 38% of its own ill-posed Qs — not worth enabling; program verifier (89% clean) is better.
+
+**LAUNCHED divfix fresh** (no resume point — prior cancel was pre-step-1): run_divfix_chain.sh tmux sp_divfix, REWARD_FIXEDPCT=1 VENDI_GOLDEN=0 (no gate) NO clip, from base, MAX_ITER=1, A→B→C→eval. Watcher bz5bnbf5d. ETA ~10.7h (~07:40 UTC Jun 30). THE test: does clean-diverse (Vendi 22) beat digit 0.6415? Then chain iter2 (never successfully run — cbfix iter2 stalled kept=0, nopack iter2 killed).
+
+---
+
+## 2026-06-29 — Vendi of verified-diverse ≈ starting (NOT collapsed); vfix(fixed-21) FAILED to hold 21 but eval'd 0.6296; divfix relaunched to completion (the clean-diverse test)
+
+**Vendi comparison (pipeline's own `_vendi_nystrom`, matched n=65):** divfix RAW (base/start) **18.7** · divfix VERIFIED>0 subset **21.7** · nopack DIGIT (0.6415) **3.3**. ⇒ **the verifiability filter PRESERVES diversity** (verified subset Vendi 21.7 ≈ starting ~21, even slightly higher than a raw sample b/c it drops the questioner's near-duplicates) and is **~6.6× the digit monoculture**. So the clean (89% well-posed) verified-diverse curriculum is also genuinely diverse — clean AND diverse, sitting unused after Stage B.
+
+**Run-identity clarification (DPW asked):** the Vendi-21.7 curriculum = **divfix** (NO cap, held diversity naturally, never trained a solver). The **fixed-21 run = vfix** (`VENDI_GOLDEN=21` setpoint gate) which **FAILED to hold 21** — dom-topic collapsed 33→47→52→59→68→**76%** over 6 steps (the verifiability clip dominated; the setpoint gate couldn't counter it). **vfix DID finish end-to-end → `RESULT_vfix_it1 = 0.6296`** (n=675, fmt 1.0), but on a COLLAPSED 507-row curriculum ≈ digit (within noise of 0.6415). So vfix's 0.6296 is NOT a diverse-curriculum result.
+
+**Eval scoreboard (Oly-675 @8192):** base 0.573 · nopack digit 0.6415 · vfix(collapsed) 0.6296 · **divfix(clean diverse, Vendi 22) = UNTESTED**.
+
+**LAUNCHED divfix to completion** (`run_divfix_chain.sh`, tmux `sp_divfix`, REWARD_FIXEDPCT=1 DW=0.5 **VENDI_GOLDEN=0** to disable the later-added gate = original divfix full-diversity behavior, NO clip, from base, MAX_ITER=1, A→B→C→eval). Watcher `bscs1sqee`. **This is THE test: does a clean+diverse (Vendi~22) curriculum beat/match the digit-monoculture 0.6415?** Watch: does Stage-A diversity hold (~31%), Stage-B band+verified row count (curriculum size — diverse Qs have lower verified rate, could be small), solver curve, eval.
+
+## 2026-06-29 — MEASUREMENT-ERROR CORRECTION (DPW caught it): judge the PROGRAM label, not the questioner's claim. "98% broken" was wrong.
+
+**The whole "questioner can't author correct problems → capability wall" conclusion (this session) was based on judging the WRONG column.** gpt-5.5 was scoring the questioner's `\boxed{}` CLAIMED answer — but the pipeline THROWS THAT AWAY. Per `judge.py`/`verify.py`: the judge writes K Python programs per question, executes them, and **program-consensus becomes the label** (`answer` column = `verified_answer`); the questioner's claim is only used for the difficulty/band score. So the questioner being bad at solving its own problems **does not matter** — that's the entire point of the verified arm, which I'd ignored.
+
+**Corrected metrics (judging the actual labels / well-posedness):**
+- **nopack (0.6415 curriculum), judged with PROGRAM labels: 92% well-formed** (46/50) — NOT 98% broken. That's simply why 0.6415 worked: clean curriculum. (Kills the earlier "robust to label noise" hand-wave — there wasn't much noise.)
+- **divfix diverse questions, well-posedness only (gpt-5.5, ignore answer): RAW 68% well-posed** (34/50) — 32% ill-posed (empty sets / contradictions / ambiguity). `~/Desktop/divfix_diverse_subsample.md`.
+- **divfix VERIFIED subset (verified>0), well-posedness: 89% well-posed** (40/45) — the verifiability filter DROPS most ill-posed Qs (empty/contradictory fail program consensus), bringing diverse questions to near digit-level cleanliness (digit=92%). `~/Desktop/divfix_VERIFIED_subsample.md`. **Yield ~24% verified>0 → ~1000 gen → ~240 verifiable, ~210 clean diverse questions = a real usable curriculum (0.6415 trained on 943).** This is the strongest evidence yet that a clean diverse curriculum is achievable; the remaining 11% ill-posed (verifier false-positives) could be cleaned by a gpt-5.5 validation pass.
+- **vfix diverse non-digit, program labels: 67% well-formed** (8/12).
+- nopack judge stats: **943/946 (99.7%) got program consensus**; questioner/majority agreed with program only **775/943 (82%)** → 18% relabeled by programs.
+
+**Corrected understanding:**
+1. The pipeline WORKS — the program verifier relabels the questioner's wrong guesses with correct answers (~92% correct for digit, ~67% for diverse).
+2. The real constraint is **program-verifiability** (can K programs solve+agree), NOT questioner self-correctness. Digit/NT/counting → program-checkable → clean labels. Geometry/proofs → no consensus → dropped (correct behavior).
+3. Diverse questions are ~68% well-posed (4× more broken than digit's ~92%, but a usable 2/3 majority). A clean diverse curriculum is achievable after filtering the bad third (program-verifier drops many; gpt-5.5 could validate the rest).
+
+**WE HAVE ZERO END-TO-END DIVERSE RESULT.** divfix/divclip/divvendi/vfix were ALL killed before Stage C — no solver, no eval, no saved program labels (divfix `models/` has only `_q`). Only nopack (digit→0.6415) ran end-to-end. **The diverse-vs-digit question is empirically OPEN** — I'd wrongly declared it closed on a broken metric. To answer it: run a diverse questioner A→B→C→eval (optionally insert a gpt-5.5 validation filter between B and C for a known-clean curriculum). vfix still running (collapsing, not useful); divfix is the right relaunch candidate.
+
+## 2026-06-29 — vfix: FIXED per-batch Vendi diversity (replaced cumulative-bank gate)
+
+divvendi diagnosis: it was COLLAPSING anyway (dom-topic 35→43% by step2, *faster* than divfix's 32%) despite full diversity gate — because the 98% verifiability-CLIP zeros the diversity contribution for the broken majority, so diversity only "counts" for the ~2% verifiable (≈digit) → clip drags toward the narrow verifiable set. Verifiability only weakly rising (mean_verified −0.61→−0.24, noisy, still negative). Also the cumulative-bank gate never engaged (needs ≥500 bank samples; showed gate 1.0) and setting VENDI_GOLDEN=21 would've *zeroed* diversity (bank already past 21, gate→0) — the sticky cumulative bank can't hold a setpoint.
+
+**DPW: "do vendi as fixed."** `diversity.py` already had the mechanism as its cold-start branch (within-batch leave-self-NN novelty). Patched (backup `.bak_vfixed`, env-gated `VENDI_FIXED=1`, jy-safe) to FORCE that branch always: **diversity = per-batch novelty (each question vs the rest of the CURRENT batch), no cumulative bank, no golden cap.** This directly penalizes within-batch redundancy, is a fixed window (can move up/down, no stickiness), and removes the gate weirdness. Launcher `run_vfix_chain.sh` tmux `sp_vfix`, `/data/selfplay_vfix`, DW=0.5, kept verif+difficulty clip. Watcher `b6fib4u9y` (tracks diversity + clip-rate + verifiability-trend).
+- **Caveat still open:** the 98%-clip-dominance is unchanged — fixed-Vendi gives a cleaner diversity *signal* but it still only applies to the ~2% non-clipped. If it collapses again, the clip (not the diversity mechanism) is the binding constraint, → loosen VERIF_MIN or accept the capability wall.
+- **Infra (compounding lesson):** killing a `sp_*` tmux orphans BOTH the `start_vllm_server.py` service AND its `VLLM::EngineCore` children (all reparent to PPID 1, keep ~70GB GPU each). Must `kill -9` all PPID=1 vLLM/service procs after a tmux kill (filter by start-time=launch-time; jy untouched). Done before each relaunch.
+
+## 2026-06-29 — divvendi: Vendi-capped diversity (replaced decay) + verifiability clip
+
+DPW: undo the diversity decay; instead **cap diversity reward by Vendi (~starting Vendi)**. **Found the mechanism already exists** in `diversity.py`: `gate = clip((VENDI_GOLDEN − bank_matched)/VENDI_GOLDEN, 0,1)`, `diversity_reward = DIVERSITY_WEIGHT·gate·novelty` — ramps diversity reward → 0 as bank Vendi → `VENDI_GOLDEN`. It was inert because `VENDI_GOLDEN=85.6` (MATH-500 ref) is unreachable (bank tops ~10–33). **Subtle bug fixed:** the REWARD_FIXEDPCT z-scoring CANCELS the gate (gate is a per-batch constant scale, removed by `(x−mean)/std`), so setting VENDI_GOLDEN alone does nothing — patched `caller_penalty.py` (backup `.bak_vendi`) to apply `_gate` to the **z-scored** diversity term: `W_DIV·_gate·z(div)`. Removed the decay block.
+- **Measured Vendi levels (from divfix diverse run):** starting/first-batch bank Vendi **≈21**, rising to **~33** as the diverse bank fills. Set **`VENDI_GOLDEN=28`** (cap around starting, with a ramp), `DIVERSITY_WEIGHT=0.5`. Kept verif+difficulty clip (VERIF_MIN0.34, diff[0.3,0.7]).
+- **HONEST CAVEAT (sticky bank):** `bank_matched` is the cumulative bank's Vendi (only grows). So once the bank fills to ~28 (a few batches), gate→0 and diversity reward turns OFF for the rest of training — functionally similar to the decay we just removed (diverse early, quality-focused later). If sustained diversity is wanted, raise VENDI_GOLDEN or use a windowed bank. Watching whether this lands "diverse-then-consolidate" vs holds.
+- Launcher `run_divvendi_chain.sh` tmux `sp_divvendi`, `/data/selfplay_divvendi`. Watcher `b6rp7ygpx` tracks diversity + gate/bank_matched + clip count; will re-run gpt-5.5 broken-% at step 4.
+- **Infra note:** killing a `sp_*` tmux ORPHANS the detached `start_vllm_server.py` reward service (PPID→1) which keeps holding GPUs — must `kill` those PIDs explicitly after a tmux kill (identified by start-time = launch-time; jy left untouched).
+
+## 2026-06-29 — divfix RESULT (98% broken) + LAUNCHED divclip (verifiability-clip + decaying diversity)
+
+**divfix verdict: the fixed-pct diversity weight PREVENTED collapse (dom-topic flat ~31% across steps 1–4 vs OLD 35→77%, 7 topics held) — but exposed a capability ceiling.** gpt-5.5 judged 60 sampled questions: **57/58 = 98% ILL-FORMED** (mostly *wrong claimed answer* — questioner can't solve its own problems — plus genuinely ill-posed/empty/contradictory). Cross-ref to pipeline `verified`: the program-verifier *correctly rejects ~91%* of broken (verified≤0), only 9% leak as verified>0 — BUT because 98% of the pool is broken, **~80% of what survives verify is still broken** (9%×98% false-pass ≫ 2% true-good). So diversity-fix gives a **diverse-but-broken-and-starved** curriculum; the digit-collapse gave a **clean+verifiable** one (→ why 0.6415 worked). **Bottleneck = questioner CAPABILITY to author correct problems, not reward weights/verifier.** divfix killed.
+
+**divclip (DPW's fix): clip + decay.** Extended `caller_penalty.py` (backup `.bak_clip`, AST-checked, env-gated, jy-safe): (1) **`REWARD_CLIP=1` verifiability+difficulty GATE** — `verified < VERIF_MIN(0.34)` OR `solver_score ∉ [CLIP_LO 0.3, CLIP_HI 0.7]` → reward=0. Rationale: currently a broken-diverse question nets POSITIVE reward (uncertainty+diversity > −0.75 verif penalty); the gate zeroes it so the questioner can only profit from verifiable+frontier questions. (2) **dynamic diversity decay** `DIV_DECAY=1`: W_DIV 0.3→floor 0.1 linearly over ~`DIV_DECAY_CALLS=10` reward calls (early diversity to break monoculture, later let verif/difficulty dominate). Launcher `run_divclip_chain.sh` tmux `sp_divclip`, `/data/selfplay_divclip`, else same recipe (flash+rp=false, from base, MAX_ITER=1). Watcher `bqxf0k6nl`.
+- **Expectation (honest):** clip likely pushes the questioner PARTLY back toward the verifiable digit-class — but a CLEAN one (correct labels), not the broken-diverse mess. Will measure: diversity curve + re-run gpt-5.5 broken-% on divclip questions (target: broken% ≪ 98%). Key test: does clean+somewhat-broader beat the clean-monoculture 0.6415?
+
+## 2026-06-29 — LAUNCHED divfix run: fixed-percentage-weight (variance-normalized) diversity reward
+
+Implemented the fix from the diversity-reward discussion (DPW's "fixed percentage weight, use current weighting"). **Patch** (`caller_penalty.py`, backup `.bak_fixedpct`, AST-checked): env-gated `REWARD_FIXEDPCT=1` branch that **z-scores each reward component across the batch then weights by current weights {uncertainty 1.0, diversity DW=0.5, verif VW=0.75}** → diversity gets a fixed ~22% SHARE of the reward signal regardless of raw magnitude (fixes scale-dwarfing → mode collapse). std≈0 → 0 (no noise blowup); malformed → −1 floor. **Purely additive/guarded: default (no env) = byte-identical original behavior**, so co-tenant `jy` unaffected (jy currently idle anyway; all 8 GPUs were free).
+- **NOT included (per DPW — current weighting only):** the bank-anchored *absolute* penalty (the part normalization can't give — can't reverse a fully-collapsed state, only prevent the slide from a fresh start). This run tests whether a real diversity *weight* prevents collapse forming from base.
+- **Launcher** `run_divfix_chain.sh` tmux `sp_divfix`, **NEW path `/data/selfplay_divfix`** (preserves the 0.6415 `selfplay_nopack` artifacts), `REWARD_FIXEDPCT=1`, else identical recipe (flash+rp=false, verified VW0.75 DW0.5, no CVBAND, from base, MAX_ITER=1, Q6/S20/NUM1000/EVAL_N9).
+- **Gate (fast):** watcher `b8selvlul` tracks per-step questioner dominant-topic% vs the OLD collapse trajectory (35→46→59→77→89→95%). If diversity holds (stays low) → let it flow to B/C/eval; if it still collapses by ~step4 → kill (~2h saved) and add the bank-anchored penalty. **A/B target: does diversity-fixed beat/≈ the collapsed 0.6415?** (iter1 was 100%-collapsed yet hit 0.6415, so "diversity helps eval" is the hypothesis under test — could be neutral.)
+
+## 2026-06-28 — QUESTIONER MODE-COLLAPSE found (DPW caught the sus-high 0.962 reward) — diversity reward is failing
+
+Inspected iter2 Stage-A questioner rollouts (`rollout_dumps/nopack_it2_verified_q/{1,6}.jsonl`, 240 rows/step) after questioner reward hit **0.962** (vs iter1's 0.561). **Questions are individually well-formed (240/240 have `<question>…</question>`+`\boxed`, median 268 ch) but SEVERELY mode-collapsed onto ONE template** ("set of integers in [1,N] containing digit d; f(n)=product/sum of digits; compute Σf(n)"):
+
+| | digit/number-rep topic share |
+|---|---|
+| iter1 step1 (from base) | 35% (7 topics — healthy) |
+| iter1 step6 | **95%** |
+| iter2 step1 | 97% |
+| iter2 step6 | **100%** (240/240 identical 60-char prefix) |
+
+**The 0.962 is reward-GAMING via collapse**, not quality: the questioner found "digit-sum-over-range" reliably maxes self-consistency-band + verifiable + format, and collapsed onto it; continued training drove 95%→100%. **The Vendi diversity reward (DW=0.5) is NOT preventing semantic mode collapse.** Claimed `\boxed` answers are unreliable (acc≈0 in dumps — SAME for iter1, so acc≈0 is normal/not the signal; but the same problem n≤1000/digit7/product is labeled BOTH 14562 and 142680 ⇒ questioner can't solve its own problems, just emits a number for format).
+- **Key nuance:** iter1 was ALSO 95% collapsed by step6 yet its solver still hit 0.6415 (digit/number-theory problems are apparently OK solver training + OlympiadBench has NT). So collapse ≠ guaranteed failure. iter2 at 100% collapse + reward-gaming questioner ⇒ uncertain whether 2nd iter helps or overfits solver to one type.
+- **This is arguably a deeper bottleneck than packing/band:** the questioner objective rewards collapse. Real fixes: stronger/embedding-level diversity penalty, topic-coverage constraint, or cap questioner training steps before collapse. (Tie to §9.10 diversity-bank issues.)
+- **Decision (DPW): KILLED iter2** (2026-06-28 ~16:30, in Stage B) — once the 100% collapse was diagnosed it was no longer informative; freed the box for a fixed-diversity-reward run instead. Clean kill: `tmux kill-session -t sp_nopack2`, GPUs 0–3 → 0 MiB, no orphans, co-tenant `jy` untouched. **iter1 0.6415 solver preserved** at `/data/selfplay_nopack/models/nopack_it1_verified_s/`.
+
+**DIVERSITY-REWARD ROOT CAUSE (why Vendi doesn't stop collapse) + fix design.** Reward formula `caller_penalty.py:175`: `final_score = uncertainty + diversity_reward + verif_term` (the dump field "accuracy" IS `diversity_reward`). From `artifacts/.../challenger_batches.md`: per-question `diversity` column = **0.00** for all iter2 questions; reward driven by `verified`(±1)+`uncertainty`. Bank Vendi actively FALLS across iter2 batches (12.8→11.8→10.7→9.7→9.0, mean_novelty 0.00, rel_delta ~−0.08) — **Vendi correctly DETECTS collapse but the reward derived from it is a non-negative novelty bonus floored at ~0, so redundancy is never penalized**, while `verified` is trivially maxed by one easy template ⇒ monotone collapse. (iter1 fresh bank: vendi 1.0→21.3, novelty +0.28 — diverse questions paid out big early, then the bonus decays to 0 as the bank fills.)
+- **Fix design (after DPW discussion):** (1) **variance-normalize reward components** so diversity isn't scale-dwarfed by verif±1 (necessary for scale; also subsumes "signed-relative-to-batch" — but NOT sufficient: at full collapse there's no within-batch variance to normalize, and dividing by ~0 std amplifies noise). (2) **bank-anchored ABSOLUTE diversity penalty** (e.g. `−λ·bank_match` / negative when novelty-vs-bank < thresh) — the part normalization can't give: provides escape gradient even at zero batch variance, and flags "batch repeats history." Note GRPO already group-centers total reward yet collapse still happened ⇒ relative centering alone insufficient, confirming the absolute term is the missing piece. (3) **difficulty reward = smooth bump (triangular/Gaussian peaked at 0.5) on TRUE solve-rate-vs-verified**, not the self-consistency `uncertainty` (§9.1) — hard-clip [0.4,0.6] avoided (zero gradient outside the band = dead zone). Optional cheap stopgaps: KL/entropy-to-base on questioner; within-batch pairwise-similarity penalty; cap Q-steps (collapse ~done by step 4–5). **MUST A/B (collapsed vs diversity-fixed → eval): iter1 was 95% collapsed yet hit 0.6415, so "less collapse → better eval" is a hypothesis, not given.** Next: inspect `diversity.py` (novelty/bank_match/`gate`) to wire the absolute penalty. GPUs free.
+
+## 2026-06-28 — LAUNCHED nopack ITER2 (does the loop compound from 0.6415?)
+
+Seeded iter2 from iter1's trained checkpoints (NOT base): Q=`nopack_it1_verified_q/global_step_6`, S=`nopack_it1_verified_s/global_step_20` (the 0.6415 solver, complete HF ckpt w/ safetensors). Same recipe (flash+rp=false, verified VW=0.75 DW=0.5, no CVBAND, Q_STEPS=6 S_STEPS=20 NUM_SAMPLES=1000 EVAL_N=9), `run_nopack_iter2.sh` tmux `sp_nopack2`, `/data/selfplay_nopack`, ITER=2, **diversity bank PERSISTED from iter1** (not reset — continues the bank). Watcher `b4h5xdwn9`. **Test:** does a 2nd iteration beat iter1 0.6415 (compounds), plateau (~0.64), or regress? Note prior cbfix iter2 STALLED with CVBAND (kept=0, questioner couldn't hit the band for the stronger solver) — here CVBAND is OFF so the self-consistency band should still pass questions; watching whether the iter2 solver curve still CLIMBS (the real signal, per the iter1 lesson). ETA ~5–6h.
+
+---
+
+## 2026-06-28 — LAUNCHED nopack full-pipeline run (fast script, packing reverted) — the fix applied to the real loop
+
+After the 2×2 settled packing as the −0.12 culprit (flash innocent), applied the fix to the production pipeline and launched a real iteration. **Edit:** `iteration_rzero.sh:71` `use_remove_padding=true→false` (backup `.bak_nopack`; flash_attention_2 + FSDP offload + ppo_max_token_len speedups all kept; shared block ⇒ both questioner Stage A and solver Stage C get rp=false). **Launcher** `run_nopack_chain.sh` (tmux `sp_nopack`, `/data/selfplay_nopack`): from base, verified VW=0.75 DW=0.5, **no CVBAND** (matches original 0.630 recipe — only packing changed vs original), MAX_ITER=1, Q_STEPS=6 S_STEPS=20 NUM_SAMPLES=1000 EVAL_N=9, `CUDA_VISIBLE_DEVICES=0,1,2,3`, logger=[console,wandb]+rollout/val dumps, per-iter Oly@8192. Refs: base 0.573 / rzc_it1 0.630 / flash_iso solver-iso 0.633.
+- **Goal:** does the *fixed fast pipeline* produce a good iteration (beat base, approach/≥0.63)? Solver-isolation already says the fixed kernel gives 0.633; this tests the full loop (questioner+band+solver) end-to-end with the fix.
+- **Caveat (flagged):** CVBAND off + single questioner draw ⇒ questioner-curriculum variance still in play (the known 0.474–0.630 spread); a low landing would likely be the draw, not packing. Repeat / add CVBAND after seeing this draw.
+- Watcher `b7c99hmcy`. Stage A starting clean (512 qprompts written, reward svc on GPU 0). ETA ~5–6h (Stage A ~2h + band + solver ~2.5h + eval).
+
+**STAGE A RESULT — questioner curve REPRODUCES rzc iter1 (packing fix recovered the divergence).** Per-step questioner reward (critic/score/mean) vs rzc iter1 reference:
+
+| step | nopack | rzc it1 | Δ |
+|---|---|---|---|
+| 1 | −0.249 | −0.344 | +0.095 |
+| 2 | −0.360 | −0.270 | −0.090 |
+| 3 | −0.093 | −0.081 | −0.012 |
+| 4 | +0.207 | +0.218 | −0.011 |
+| 5 | +0.428 | +0.463 | −0.035 |
+| 6 | **+0.561** | **+0.587** | **−0.026** |
+
+vs the packing-on **redo step-6 +0.259** (the divergence we were explaining). ⇒ **`use_remove_padding=true` was corrupting the QUESTIONER's gradients too** — reverting it makes the Stage-A curve track iter1 within ~0.03 at step 6 (residual Δ explained by diversity-bank cold-start + stochastic n-sample solver scoring + timing-split reward §9.10, none of which are packing). This is independent corroboration of the packing finding on a *different* model/stage. Stage A saved questioner ckpt `nopack_it1_verified_q/global_step_6`; Stage B (band) running. (The Traceback at the A→B handoff is the benign DataLoader-worker teardown, same as all runs — pipeline advanced to B normally.)
+
+**STAGE B/C — DIVERGES from iter1 despite matching questioner (band/curriculum, NOT packing).** Stage B band-filter [0.3,0.8] passed **943 solver-training rows** (`[judge] 946 band-filtered → 943 verified`, of NUM_SAMPLES=1000 ⇒ **94.6% band-pass**) vs **rzc iter1's 108**. Adaptive batch → **256/128** (vs rzc 64/32). The kept set is HARD/low-correctness: solver Stage-C reward starts **0.150** (rzc started 0.565) and climbs slowly (0.15→0.19→0.24→0.28→0.34 by step10) — won't reach rzc's 0.79. So even with packing fixed and the questioner reproducing iter1, the **band passed a 9× larger, much-harder, mostly-wrong-but-self-consistent set** (the §9.1 band-bug, more extreme than the redo's 196). **This is the questioner-non-determinism (§9.10: cold diversity bank + stochastic scoring) × band-has-no-correctness-guardrail (§9.1) bottleneck — exactly what the 06-25 investigation concluded is the REAL cap, and packing was never it.** rzc's 108-learnable-row draw was favorable; this draw is unfavorable.
+
+**RESULT (decisive, and it OVERTURNS the mid-run pessimism): nopack iter1 = OlympiadBench-675 @8192 `acc|fmt=0.6415 fmt=1.0 trunc=0 mean 7960ch` — NEW BEST, beats base +0.068.** Solver curve CLIMBED monotonically 0.150→0.228→0.339→0.412→**0.515** (steps 1/5/10/15/20). The "943 rows / 0.15 start" alarm was a MISREAD: the big in-band set was hard-but-LEARNABLE, not unlearnable garbage. **The correct discriminator is the solver-reward TRAJECTORY, not row-count or start value:** the failed redo (eval 0.474) had reward that *declined* 0.246→0.17 (garbage curriculum); this run *climbed* 0.15→0.515 (learnable). Same surface features (low start, large band-pass), opposite slope, opposite outcome.
+
+| Oly-675 @8192 | pass |
+|---|---|
+| base Qwen3.5-4B | 0.573 |
+| rzc iter1 (original 0.630) | 0.630 |
+| flash_iso (solver-iso) | 0.633 |
+| **nopack full pipeline (this)** | **0.6415** |
+
+**Conclusions:** (1) The full self-play loop (questioner+band+solver from base) is **net-beneficial (+0.068 over base)** once packing is fixed — it did NOT cap at base or collapse. The earlier "loop caps at base / iter2 regresses" story was substantially the packing bug + unlucky *declining* draws, not a fundamental ceiling. (2) 0.6415 vs 0.633/0.630 is within the ~0.01 run-to-run noise measured in the 2×2 ⇒ "top of cluster, clearly beats base," not a confident record. (3) Lesson recorded: judge curriculum quality by reward SLOPE, not band-pass count or starting reward — the 943-vs-108 row gap was a red herring. **Next levers (DPW's call): (a) iter2 from this 0.6415 solver — does a 2nd guarded iteration keep climbing or plateau? (b) variance: repeat nopack iter1 ×N for an error bar; (c) nopack + CVBAND to compare a correctness-gated curriculum. GPUs free; sessions cleaned up.**
+
+---
+
+## 2026-06-28 — DECISIVE: `remove_padding=true` (packing) ALONE costs −11.3pt on Qwen3.5 GDN (0.621→0.508), drops below base. 2×2 complete.
+
+**The kernel-iso 2×2 finished. Clean apples-to-apples isolation of `use_remove_padding` (packing), holding attn=sdpa + every other knob byte-identical (108-row `rzcev_it1_verified_verl08`, 20 steps, n=5, 4096, lr1e-6, kl1e-2).**
+
+| arm | `remove_padding` | attn | **OlympiadBench-675 @8192** | format_rate | mean chars | vs base 0.573 |
+|---|---|---|---|---|---|---|
+| **orig-iso** (control) | **false** | sdpa | **0.621** | 1.00 | 7509 | +0.048 — reproduces SOLVER2 0.630 (within noise) |
+| **pad-iso** | **true** | sdpa | **0.508** | 1.00 | 5948 | −0.065 — **below base** |
+
+**Δ(packing) = −0.113.** Both `format_rate=1.0`, `truncated~=0`, same harness (eval_oly_shard.py, 4-GPU greedy @8192, full 675) ⇒ the gap is **pure `acc|formatted`** (real reasoning), NOT formatting/truncation. Packing also made the model **terser** (5948 vs 7509 chars) AND worse — the opposite of a length problem.
+
+**Conclusions:**
+1. **`use_remove_padding=true` is a real gradient corruptor on the Qwen3.5 hybrid (GDN/linear-attn) model — ~11pt eval hit, sufficient to push a 0.621 solver below the 0.573 base, independent of flash attention.** Sole variable changed; attn held at sdpa.
+2. **The control (sdpa+rp=false) reproduces the 0.630-era number (0.621)** — confirms once more the code/data are clean; the earlier reproduction failures (redo 0.474, kernel-iso ramble) were driven by *self-introduced* confounds (rp=true packing here quantified; questioner-curriculum variance separately).
+3. **Distinct from the flash+rp=true kernel-iso collapse:** that one *rambled* (no-`\boxed` rumination, train-acc 0.80→0.58); sdpa+rp=true here is *terser-and-worse*, not rambling. So flash adds a separate failure mode on top of packing — packing alone is already −11pt; flash+packing is worse.
+4. **Does NOT change the real-experiment story:** the actual iter1(0.630)→iter2(0.545) regression ran rp=**false** both iters (provenance settled below), so packing was never in the real loop — that regression remains the questioner-curriculum/favorable-draw finding. Packing is the confound that corrupted my *optimization/repro* runs (smoke_opt, kernel-iso, redo), now quantified.
+
+**Harness fix landed + validated in production:** the verl ckpt-format footgun (FSDP-sharded `.pt`, empty `huggingface/` subdir → vLLM "Cannot find any model weights" → eval n=0 ZeroDivisionError) is fixed by an auto-merge block in `run_oly.sh` (`.bak_premerge`) that runs `verl.model_merger merge --backend fsdp` if `$MODEL` lacks safetensors. pad_iso's auto-eval exercised it live (merged → repointed → 675 rows). Merged HF ckpts at `/data/{orig,pad}_iso/solver/global_step_20/actor/hf_merged` (9.08GB each). See ARCHITECTURE.md Footguns.
+
+**Status:** sdpa-row runs DONE + cleaned up. **Then completed the full 2×2 over attn × remove_padding** (GPUs were idle → kept them working): eval'd the existing kernel_iso (flash+rp=true) ckpt via the merge fix (no retraining), and launched flash_iso (flash+rp=false, the missing cell). flash+rp=false is **untested on this env** but **smoke-passed** (reached step 2, score 0.548 — the path runs; revises §9.9's "old kernel path crashes" which referred to offload specifics).
+
+**FULL 2×2 COMPLETE (OlympiadBench-675 @8192, greedy, format_rate≈1.0, same harness; 108-row/20-step/n5/4096, only attn × remove_padding vary):**
+
+| | rp=false (no packing) | rp=true (packing) |
+|---|---|---|
+| **sdpa** | **0.621** (orig, 7509 ch) | **0.508** (pad, 5948 ch) |
+| **flash** | **0.633** (flash_iso, 7612 ch) | **0.495** (kernel, 8536 ch) |
+
+- **`use_remove_padding=true` (packing) is the ENTIRE effect, −0.12, identical across both attn backends.** No-packing reproduces ≈0.63 (beats base 0.573); packing drops to ≈0.50 (below base). This is **no longer n=1**: two independent no-packing runs (0.621, 0.633) and two independent packing runs (0.508, 0.495) — within-level spread ≈0.012, so the −0.12 packing gap is ~10× the noise. Variance-controlled by construction.
+- **Flash attention is INNOCENT** (the original suspect, now cleared): 0.621→0.633 at rp=false and 0.508→0.495 at rp=true — flash moves nothing beyond noise (±0.013). The kernel-swap confound was **100% the `remove_padding=true` that rode along with it**, not flash. Interaction negligible.
+- **The two packing arms fail in OPPOSITE directions** — sdpa+packing goes **terse**-and-worse (5948 ch), flash+packing goes **verbose/rambling**-and-worse (8536 ch, longest of all four). Packing corrupts accuracy regardless; attn only steers *how* it fails (terse vs ramble). Both no-packing arms sit at normal length (~7500–7600 ch).
+- **Bottom line:** never enable `use_remove_padding` on Qwen3.5 GDN for a learning-faithful run; flash_attention_2 is fine. flash_iso (flash+rp=false) is the recommended fast+faithful kernel: 0.633, healthy curve (score→0.77, rlen stable ~2050, no rambling), and it RUNS on the current env (the §9.9 "old path crashes" was an offload-config issue, not flash itself).
+- kernel_iso eval caveat: its ckpt had no `generation_config` (merge fell back to model-config default) — negligible under greedy eval; format_rate 0.9985 (1 no-answer). All four trained cleanly rc=0 (the end-of-run `DataLoader worker … Killed` Traceback is benign teardown).
+
+**Open fork for DPW (after flash_iso lands):** (a) the questioner-curriculum thread (the actual iter2-regression lever) — loosen CVBAND / variance study; (b) upload iso ckpts to HF (Dylan1631) if worth keeping.
+
+---
+
+## 2026-06-28 — orig-iso 2×2 control HEALTHY at step16; auto-chain to pad_iso wired server-side
+
+**Status check (00:51 UTC), after the orig-iso watcher hit its poll cap.** `sp_oiso` (control: sdpa + `use_remove_padding=false` + 8192, 108-row `rzcev_it1_verified_verl08`, 20 steps) is **alive and progressing cleanly**: at global_step 16, `critic/score/mean` ~0.71–0.76 (rising), `response_length/mean` 2159 (stable, not rambling), `aborted_ratio=0.0`, step time ~456s (~7.6 min/step; gen 270s dominates, update_actor 106s, throughput 405 tok/s). This is the SOLVER2-like trajectory (monotone rise, terse) — i.e. the **control does NOT degrade**, unlike kernel-iso (flash+rp=true) which rambled to 0.58. ~4 steps + full-675 Oly@8192 eval remain (~30–40 min).
+- **Auto-chain wired (was NOT actually wired before):** `run_orig_iso.sh` ends after its own eval (`RESULT orig_iso_8k`) and does **not** launch pad_iso; the prior watcher only polled. Added server-side waiter `chain_oiso_to_piso.sh` (tmux `sp_chain`, log `/data/chain_oiso_to_piso.log`) that blocks on `tmux has-session -t sp_oiso`, then on session-end launches `run_pad_iso.sh` in tmux `sp_piso` → `/data/pad_iso_run.log` (guarded against double-launch). Survives laptop sleep. pad_iso = identical config but `use_remove_padding=TRUE` → isolates packing alone.
+- Co-tenant: `jy` session (jinyuan/R-Zero) untouched; staying in GPU lane 0–3. Local milestone watcher `bxdmo0wp0` re-invokes on eval-result / pad-launch / error.
+
+**UPDATE (01:10–01:14 UTC): orig-iso TRAIN finished clean (20 steps, rc=0) but its Oly EVAL crashed `ZeroDivisionError` (n=0) — root-caused to a verl checkpoint-format footgun, NOT the experiment. FIXED.**
+- **Root cause:** verl (vllm-0.23 env) saves the actor checkpoint as **FSDP-sharded `.pt`** (`model_world_size_4_rank_{0-3}.pt`, 5.17 GB each = intact weights) + an `actor/huggingface/` subdir containing **only config + tokenizer, NO safetensors**. `run_oly.sh` pointed vLLM at `actor/huggingface` → `RuntimeError: Cannot find any model weights` → all 4 eval shards died in 67s → 0 rows → `agg.py` `fmt/n` with n=0. **`kernel_iso`'s ckpt has the identical empty-`huggingface` structure — this is systematic in this verl version; a merge step is mandatory before any vLLM eval.** Training weights are fully intact → nothing lost.
+- **Fix 1 (orig-iso):** ran `python -m verl.model_merger merge --backend fsdp --local_dir .../global_step_20/actor --target_dir .../actor/hf_merged` to consolidate shards → HF safetensors (in progress; CPU-side, didn't disturb pad_iso GPUs).
+- **Fix 2 (harness, durable):** patched `run_oly.sh` (backup `.bak_premerge`, bash-syntax-checked, was not open) to **auto-merge if `$MODEL` lacks safetensors** (merges `dirname $MODEL` → `hf_merged`, copies processor configs, repoints `MODEL`). This makes pad_iso's own step-20 auto-eval work, and any future eval. Invoked fresh per eval so the running `run_pad_iso.sh` was NOT edited (safe).
+- **Fix 3 (sequencing):** `sp_finish` waiter re-runs the orig-iso Oly eval on the merged ckpt after pad_iso's session ends (GPUs freed) — both 2×2 numbers land on the same harness, no contention.
+- **Note:** a pre-existing "cell-B auto-launcher" watcher from the prior session ALSO tried to launch pad_iso — hit `duplicate session: sp_piso` (my `sp_chain` won the race by 7s); the tmux guard prevented a double-launch. Single pad_iso confirmed.
+
+---
+
+## 2026-06-27 — PROVENANCE settled: real verified iter1+iter2 ran sdpa+remove_padding=FALSE → padding is NOT the regression cause; + padding-bug isolation
+
+**Question (DPW):** is the WashU `iteration_rzero.sh` actually the code that ran Qwen3.5 iter1, or could the real run have used `use_remove_padding=true` (Chengson was confused about padding)? **Answered from runtime ground truth** — verl dumps the fully-resolved `.hydra/config.yaml` at every launch, so we don't have to trust the script.
+
+**Findings (from `.hydra/config.yaml` of the ACTUAL runs):**
+- WashU `/home/compute/jiaxinh/outputs/2026-06-21/*` = the **majority** arm (`rzcm_*_majority_{q,s}`), all **ACTOR `use_remove_padding=False`, `attn=sdpa`**. (The `use_remove_padding: true` seen by naive grep is `critic.model.use_remove_padding` — a dead default; `adv_estimator=grpo` ⇒ no critic.)
+- The **verified** arm (the 0.630→0.545 subject) ran on **Brev**, not WashU: `~/outputs/2026-06-21/18-22-47` = `rzcev_it1_verified_s` (the 0.630), and `~/outputs/2026-06-22/{12-22-16,23-49-38}` = `cont_it2_verified_s` (the 0.545). **Both: ACTOR `use_remove_padding=False`, `attn=sdpa`, max_resp=4096, 20 steps — byte-identical solver config.**
+- The ONLY runs that ever used `rp=True + flash_attention_2` are my own `smoke_opt` (Jun 23) and `kernel-iso` (Jun 26) optimization experiments.
+
+**Conclusions:**
+1. **Yes, the diffed script == what ran iter1** (proven by runtime config, not mtime), and it ran the **safe unpacked path**.
+2. **Padding/packing is NOT the cause of iter2 < base** — the real experiment never enabled it. The `rp=true` degradation is a *separate, self-introduced* bug.
+3. iter1 and iter2 ran **identical solver config** ⇒ the regression is in the **iter2 training DATA** (evolved questioner + band/CVBAND), not the solver kernel. Back to the CVBAND thread.
+4. **Logging gap confirmed:** real iter1/iter2 used `logger=[console]` w/ no rollout dump → in-training reward curves were NOT saved (only final eval 0.630/0.545 survive). This is exactly why the rollout-dump patch was later added. `main_ppo.log` files are 0-byte; `RUN_verified.log` is a 530B summary; `svc_*.log` are the questioner scoring service, not solver curves.
+
+**Padding-bug isolation (characterizing the footgun, NOT the regression):** kernel-iso (flash+rp=true, 108-row data) DEGRADED acc 0.80(step7)→0.58(step20) via rambling/no-`\boxed` rumination, while SOLVER2 (sdpa+rp=false, same data) rose monotonically to 0.79. Running a clean 2×2 to pin flash-vs-packing: `orig-iso` (sdpa+rp=false+8192, tmux sp_oiso) as control, then `pad_iso` (sdpa+rp=true+8192, tmux sp_piso, auto-launches after) isolates `remove_padding` alone. **Reward code is byte-identical Brev↔WashU; `math.py` format_reward is a DEAD constant 0** (regex requires `<think>` but `enable_thinking=false`) ⇒ solver reward = `0.9·accuracy` exactly, nothing rewards length/rambling — the degradation is corrupted-gradient (packing), not reward-driven.
+
+---
+
+## 2026-06-26 — rzero2 CUDA toolchain FIXED (was broken: cold-compile of Qwen3.5 GDN tilelang kernel); + kernel-vs-questioner isolation
+
+**FOOTGUN found + fixed:** the Brev `rzero2` env (vllm 0.23/torch 2.11+cu130) had an **internally-inconsistent cu13 toolkit** — `nvidia-cuda-nvcc==13.2.78`, `nvidia-cuda-runtime==13.0.96` (CUDART_VERSION 13000), `cccl==13.3.3.3.1`, `crt==13.3.33`. It could NOT cold-compile the Qwen3.5 hybrid (GDN/linear-attn) **tilelang** kernel; all training "worked" only via a **warm `~/.tilelang` compile cache** (built earlier when the toolchain was consistent at 13.2). During the iter1-repro effort I `rm -rf ~/.tilelang`, which **exposed the breakage** — every cold compile then failed with `tl_templates/cuda/instruction/mma.h` → really two layered errors: (1) cccl `cuda_toolkit.h:40` "CUDA compiler and toolkit headers incompatible" = the check `nvcc_version == CUDART_VERSION` failing (nvcc 13.2 vs runtime 13.0); (2) after nvcc→13.0, `ptxas: Unsupported .version 9.2; current 9.0` = tilelang emits **PTX 9.2 (CUDA 13.2 ISA)** but ptxas 13.0 only does 9.0.
+
+**FIX (verified working):** align the whole cu13 compiler set to a consistent **13.2**: `pip install nvidia-cuda-nvcc==13.2.78 nvidia-cuda-runtime==13.2.75 nvidia-cuda-cccl==13.2.75 nvidia-cuda-crt==13.2.78 nvidia-cuda-nvrtc==13.2.78`, then `rm -rf ~/.tilelang`. Now nvcc==CUDART==13.2 (cccl passes) AND ptxas 13.2 handles tilelang's 9.2 PTX; cubin runs fine on the CUDA-13.0 **driver** (580.65.06) via forward-compat. **torch 2.11 verified still working on CUDA** (doesn't hard-pin cuda-runtime). tilelang now **cold-compiles the GDN kernel successfully** and the cache repopulates. The env is now *better* than the original freeze (which relied on a cache to mask the inconsistency). **Lesson: never `rm -rf ~/.tilelang` on a box whose toolchain can't cold-recompile; back it up first.** Also: a tooling bug bit repeatedly — `pkill -f oldkernel_smoke` matched the ssh shell running the command (its cmdline contained the string) → silently killed its own shell → launches "didn't take" + stale logs. Use PID-based kills, never `pkill -f <string-also-in-your-command>`.
+
+**Kernel-vs-questioner isolation (in progress):** to test whether the 0.474-vs-0.630 regression is the kernel flag (sdpa→flash) or the questioner's curriculum, train the solver on the **original's exact 108-row parquet** (`rzcev_it1_verified_verl08`) with the current **flash** kernel, 20 steps + eval, vs SOLVER2 (sdpa, same data, → 0.630). **Step-1 already matched** (flash 0.554 ≈ sdpa 0.565, from the earlier it1-repro). SOLVER2 sdpa curve rose 0.565→0.79 (clip 0.44→0.07). The full flash run (`run_kernel_iso.sh`, tmux sp_kiso) now runs on the fixed env — streaming flash-vs-sdpa per step. **Working hypothesis (DPW's, well-argued):** a 0.15 sign-flipping swing is too large for near-equivalent infra OR random variance → it's **systematic, and it's the questioner's curriculum** (the questioner diverges at Stage-A step 1→2: gap 0.006→0.067→…→0.328 by step 6, compounding). If kernel-iso ≈ 0.630, that's confirmed and we focus on *why the questioner's first update diverges*.
+
+---
+
+## 2026-06-25 — iter1 code is CLEAN (repro 0.554≈0.565); from-base iter1 redo launched; reproducibility footguns found (kernel patch, diversity bank, timing-split reward batching, adaptive batch)
+
+**Goal:** decide whether the iter1→iter2 U-shape is real learning or expected plateau. First validate the code reproduces iter1. Established the iter1→iter2 regression is **not a code/reward change** — it's inputs.
+
+**iter1 solver step-1 repro (CODE IS CLEAN):** re-ran iter1's Stage-C step 1 with current code on iter1's exact inputs (base Qwen3.5-4B + `rzcev_it1_verified_verl08.parquet` 108 rows, batch 64, 4096, n=5). Step-1 reward **0.554 vs original SOLVER2.log 0.565** (rlen 3034 vs 2967, clip 0.45 vs 0.44) — match within vLLM sampling noise. ⇒ current code faithfully reproduces iter1; the iter1→iter2 drop is in the **inputs** (questioner lineage verified→clip80, question difficulty, batch 64→256), not code. (Had to swap sdpa+remove_padding=false → flash+remove_padding=true to avoid an FSDP-offload assertion + `mma.h` kernel crash on the current env — generation/reward unaffected since vLLM does generation.)
+
+**Budget test (it2_8k, cancelled after step 1):** input solver (verified-20) on iter2 questions at 8192 gave step-1 acc **0.521** vs 0.32 at 4096 — confirms the *measurement* gap (difficulty_dist 0.50 vs Stage-C 0.32) was the 4096 cap suppressing long-reasoning rollouts. BUT budget is a **constant** across iter1 & iter2 (both trained Stage-C at 4096 — verified in `iteration_rzero.sh.bak_preopt`), so budget does NOT explain the regression. Eval is greedy @8192 (all arms), fmt_rate=1.0 everywhere → the iter1→iter2 eval drop is pure acc|fmt (reasoning). Solver gets terser each iter (8k mean tokens base 3627→it1 2785→it2 2616); it1's shortening helped, it2's hurt (U-shape).
+
+**Dead clip from-base runs:** clip80 and clip65 BOTH died in **Stage B band-eval** (clip80 stopped ~06:00 after Stage A — its questioner was reused by cont; clip65 vLLM engine died 21:09, hung 2h, killed this session). Neither produced a solver or eval. Only the original **rzcev iter1** (solver `rzcev_it1_verified_s2`, eval 0.630) has real iter1 solver data.
+
+**cont iter2-4 run is BROKEN (flagged):** `iter23_continue.sh` had `WANDB_API_KEY: unbound` (wandb OFF), HF upload failing (token perms), per-iter eval used the n=200 first-200 bug (reports 0.325 not full-675 0.545), and **the solver FROZE at iter2** (iter3 Stage-C OOM → iter3/iter4 reused `cont_it2_verified_s`). Live iter4 was improving only the questioner against a stale iter2 solver.
+
+**iter1 REDO launched (tmux `sp_it1redo`, `/data/selfplay_it1redo`):** from base, verified VW=0.75 DW=0.5, MAX_ITER=1, faithful knobs (Q_STEPS=6 S_STEPS=20 NUM_SAMPLES=1000 EVAL_N=9 4096), wandb on (.netrc), rollout+val dumps, full-675 Oly eval. **First from-base run to clear Stage B band-eval** (the `/data` move killed the disk failure mode). Cleared Stage A (questioner 6/6, ~15-18min/step) and Stage B → **196 band-passed rows**.
+
+**REPRODUCIBILITY FOOTGUNS (the redo is NOT bit-faithful to rzc, on 3 axes — none are experiment knobs):**
+1. **Questioner curve diverges**: step-1 reward identical (−0.344 vs −0.350) but rzc ramps to **+0.587** by step 6 while redo only **+0.259**; redo entropy much higher (0.39→0.32 vs 0.61→0.47). Hyperparams/qprompts(md5)/dtype/enable_thinking all **byte-identical**. Causes: (a) **kernel patch** — rzc ran `sdpa`+`use_remove_padding=False`, redo runs `flash_attention_2`+`True` (changes training-forward numerics → entropy/KL/grads; old path now CRASHES on the upgraded env so can't revert easily); (b) **env drift** vllm→0.23.0/transformers 5.12.1; (c) **diversity bank cold-start** — launcher `rm -f diversity_mem.npy`, redo starts vendi=1.0. `remove_padding` alone shouldn't move learning 55% (DPW correct) — the entropy gap is likely partly a metric-normalization artifact; the real outcome signal is the reward curve, most plausibly diversity-bank + stochastic solver scoring. rzc's `challenger_batches.md` is DELETED → can't do direct component comparison.
+2. **Timing-split reward batching** (`caller_reward_manager_verl08.py`): challenger reward is "irreducibly BATCH" — coalesces a step's questions via a **wall-clock debounce** (`REWARD_COALESCE_DEBOUNCE=0.8s`) then computes diversity as nearest-neighbor similarity across that flush. Redo splits the 240 (60×4) questions into ~220 + ~16 stragglers each step (`challenger_batches.md`: judged 220|17, 225|15, 224|16) → stragglers get diversity over ~16 neighbors → inflated. Wall-clock debounce makes questioner reward **non-deterministic w.r.t. timing/env speed**. Fix: make flush count-based, seed/persist the diversity bank.
+3. **Adaptive solver batch**: redo's 196 rows → adaptive logic picks **batch 128/mini 64** vs rzc's 108 rows → **64/32**. So Stage C trains on ~2× data at 2× batch.
+
+**RESULT (2026-06-25, decisive): iter1 redo = OlympiadBench 0.474 — did NOT reproduce, and is BELOW BASE (0.573).** `RESULT_it1redo_8k n=675 format_rate=1.0 acc|fmt=0.474 pass=0.474 mean 7117ch trunc=3` — clean reasoning number, same harness. vs base 0.573 / rzc iter1 0.630 / iter2 0.545. The self-play iteration **made the solver worse than base.**
+
+**Solver training reward DECLINED during the run** (not plateaued): step1 0.246 → peak 0.287 (step7) → **0.174 (step20)**. GRPO on this curriculum actively degraded the model. The redo's 196 band-passed questions were far harder/less-learnable than rzc's 108 (solver step-1 reward 0.246 vs rzc 0.565; clip_ratio 0.68 vs 0.44). Both passed the identical self-consistency band [0.3,0.8] — but the redo's are low-correctness (the band-bug §8.1: self-consistency ≠ correctness).
+
+**CONCLUSION — the whole investigation lands here:** iter1's 0.630 was **NOT robustly reproducible**. Same code (proven by the 0.554≈0.565 step-1 repro), same config (byte-identical hyperparams/prompts), but the questioner is non-deterministic (env/kernel drift §9.9 + diversity-bank cold-start + wall-clock timing-split reward batching §9.10 + stochastic n=10 solver scoring), so it produced a *different, harder* question distribution. The self-consistency band has **no correctness guardrail**, so the harder set flowed through and training degraded the solver below base. **The original iter1 (0.630) was substantially a FAVORABLE DRAW** — a questioner run that happened to land a learnable curriculum. The U-shape (iter1↑/iter2↓) is the same phenomenon across iterations: the loop is not reliably beneficial; a bad questioner draw regresses below base.
+
+**Two concrete fixes for robustness (not yet applied):** (1) make the questioner deterministic — seed+persist `diversity_mem.npy`, change the reward flush from wall-clock debounce to **count-based**, pin kernel+env; (2) gate the solver curriculum on **correctness vs the program label** (`correctness_band.py`/CVBAND), not self-consistency — so a hard-questioner draw can't hand the solver an unlearnable set. Also still TODO: fix the cont run's wandb/HF/eval-n200/frozen-solver bugs (§9.11) before trusting any of its numbers.
+
+**ADDENDUM (2026-06-25, later) — WashU diff CONFIRMS kernel is the ONLY substantive change; but the old kernel CANNOT run on Brev's upgraded env.** Diffed the WashU iteration_rzero.sh (`/home/compute/jiaxinh/R-Zero/scripts/`, dated **Jun 21 12:56 — hours before rzc iter1**) vs current Brev: the only training-math difference is **`sdpa+use_remove_padding=false` → `flash_attention_2+use_remove_padding=true`**. Everything else benign (logger, REWARD_COALESCE_DEBOUNCE 0.8→2.0, N_SVC plumbing, FSDP_OFFLOAD-as-var default-unchanged, CVBAND additive/off). **Tried to isolate the kernel** by re-running iter1's Stage-C inputs with sdpa+remove_padding=false: FSDP-offload-ON → `offload_fsdp_model_to_cpu` AssertionError; offload-OFF + gpu_mem 0.5 → CUDA OOM (padded path is memory-heavy); offload-OFF + gpu_mem 0.3 → **TileLang `mma.h` kernel compile crash** (`tilelang/.../src/tl_templates/cuda/instruction/mma.h`). The Qwen3.5 hybrid (GDN/mamba) `remove_padding=false` path won't compile on CUDA13/vllm-0.23. **So the 0.630-era kernel can't be tested on Brev without rebuilding the old env** (WashU has it but a known verl-training bug; would need fixing). NOTE: the kernel's causal role is *indirect* anyway — 0.474 was driven by questioner *variance* → harder questions → self-consistency band passing them; kernel is one variance source, the band-bug is the amplifier. **DECISION: relaunched the robust-fix run (cbfix: CVBAND=1 correctness band + debounce 2.0, from base, verified, MAX_ITER=2, /data/selfplay_cbfix, tmux sp_cbfix) — it addresses the actual failure mode (bad draw → unlearnable curriculum) and is runnable on Brev. Watching: does the solver reward RISE (vs the nofix run's decline to 0.17) and the eval beat base 0.573 / approach 0.630.** Pending: cbfix iter1 eval (watcher bm6530ky5).
+
+**CBFIX ITER1 RESULT (2026-06-25): correctness-band fix WORKED on the failure mode — recovered +0.071, but still below base.** `RESULT_cbfix_it1_8k n=675 acc|fmt=0.545 fmt=1.0 trunc=0`. vs nofix 0.474 / base 0.573 / rzc 0.630. CVBAND filtered 196→**73 rows** (the genuinely-learnable solve-rate-in-(0.2,0.8) subset). **Solver reward ROSE 0.40→0.56** (peak step10) instead of the nofix run's collapse to 0.17; clip dropped 0.46→0.20. So the correctness guardrail **eliminated the below-base degradation** (no reward collapse, +0.071 eval recovery) — but one iteration still **did NOT beat base** (0.545 < 0.573). Conclusion strengthened: the band-bug fix makes self-play *safe* (prevents the unlearnable-curriculum collapse) but not *beneficial* on a strong Qwen3.5 base — a single iteration from a variance-affected questioner lands ~0.545 regardless. Now running iter2 (watcher bb78frwqv) to see if a 2nd guarded iteration climbs or stays flat.
+
+**CBFIX ITER2 RESULT (2026-06-25) — guardrail correctly REFUSED an unlearnable curriculum; loop STALLED, not regressed.** iter2 `CVBAND: in=65 matched=65 kept=0` → `B done: 0 solver-training rows` → `C: skipped` → solver stayed = cbfix iter1 (`newS=cbfix_it1_verified_s` unchanged) → iter2 eval = iter1 eval = **0.545**. The iter2 questioner (trained vs the stronger iter1 solver) produced 65 band-passed questions but **NONE had solve-rate-vs-label in (0.2,0.8)** — all too-easy (>0.8) or too-hard (<0.2) for the iter1 solver. So the correctness guardrail did its job (no training on garbage → no degradation), but the loop made **no progress**.
+
+**FINAL TWO-ITER CONCLUSION (the whole investigation lands here):** nofix iter1 0.474 (collapse, below base) → cbfix iter1 0.545 (safe, recovered, still below base) → cbfix iter2 0.545 (0 learnable Qs, stalled). The correctness-band fix is a **successful SAFETY mechanism** (eliminates the unlearnable-curriculum collapse; refuses bad curricula) but makes the loop **safe, not beneficial**. On a strong Qwen3.5 base: (a) one self-play iteration doesn't beat base even with a clean curriculum, and (b) as the solver strengthens, the questioner can't hit the learnable competence-frontier band → the loop stalls (kept=0). **The original iter1 0.630 was a favorable draw.** The real bottleneck is NOT the band mechanics — it's **questioner curriculum quality on a strong base** (can't reliably generate learnable-and-beneficial problems). The kernel (sole code change from 0.630) couldn't be tested on Brev (TileLang mma.h) and is at most an indirect variance source. **Next levers (user's call): (1) loosen CVBAND band (e.g. (0.1,0.9)) so iter2 isn't starved; (2) variance study — re-run iter1 ×N to quantify the draw spread; (3) rebuild old env to isolate the kernel; (4) accept self-play caps at ~base on this strong base and pivot the questioner objective.** cbfix chain DONE 14:31 UTC; GPUs free.
+
+---
+
 ## 2026-06-24 — clip65 (clipped+verified) LAUNCHED to /data by the watchdog loop
 
 The mission-control `/loop` (assigned 06-23 ~07:25 to launch the clipped+verified run when the Brev lane frees) completed its mission after ~36 iterations / ~18h. iter234 (the verified chain 2→3→4) held the lane all night, then went through a volatile crash/relaunch window (iter4 reward-svc ConnectionError ~02:04, then idle→busy→idle oscillation while the parallel Claude recovered it). The loop correctly **did NOT** grab the lane during those brief/contested gaps. At ~20:45 the lane went **stably idle** (GPUs 0 MiB, recent run exited; only 52-day-old ray zombies left).
