@@ -4,6 +4,36 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-02 — STAGE-B PIPELINE-REAL RESULT (v2 questioner): trainable 8.3%, K=10 verifier FIXED (83% consensus); v3 measured (joint 23%, eff-skills 7.5); campaign notes consolidated.
+
+### Stage-B run (Empire job 982595, completed 07:48 — first pipeline-real measurement of an SFT questioner)
+```
+generated (v2 questioner):     3,000
+in-band [0.3,0.8] (n=9 real):    301   = 10%    (LLM proxy had said 28% — real band filters v2's easy-skew hard)
+K=10 MIN_AGREE=6 consensus:      249   = 83% of band  ← VERIFIER BOTTLENECK FIXED (was 16–48% at K=3)
+TRAINABLE:                       249/3,000 = 8.3%   (diverse)
+majority-vs-program-label agreement: 197/249 = 79% (≈ nopack's 82%)
+verify_rollouts.jsonl: 301 rows — verifier PROGRAMS persisted for the first time (DUMP_VERIFY_DIR patch works)
+```
+**Pipeline-real comparison:** divfix RL questioner = 21% trainable but skill-collapsed (77% digit, eff-skills ~3.6); v2 SFT = 8.3% trainable at full diversity. The RL band-reward is genuinely better at difficulty-targeting (24% vs 10% in-band); the SFT approach wins verification (83% vs ~50–90% variable) and diversity. **The gap is entirely the difficulty axis** → v3/v4 direction confirmed. Solver GRPO NOT run (per DPW: high-quality questions first).
+
+### v3 measured (full battery): eff-skills **7.5** (campaign best; base 6.2), digit 23%, difficulty 37/33/30 (trivial/sweet/hard vs v2's 48/28/23), verifiable 94%, well-posed 76% (STRICT judge; verifiable>wellposed means 18% are computable-but-flagged; pipeline K=10 standard reads higher), **joint 23%** (vs v2 20%, RL-diverse 4–10%). Ceiling identified: **P(well-posed|hard) ≈ 70% flat across v2/v3** = generation-capability limit (4B composes constraints it can't self-check), NOT target curation — the 6 sweet-spot failures are all incoherence (impossible congruence, vacuous condition, precedence ambiguity).
+
+### Metric definitions (for the record)
+- **eff-skills** = exp(entropy) of LLM-judged skill-tag distribution (10-tag taxonomy, judged on core solving skill) — NOT embedding-Vendi (retired: measures wording, hid the divfix skill collapse). Caveat: currently measured on raw output; the number that matters is eff-skills|trainable (pending: judge the 249-row curriculum).
+- **well-posed** = independent agent writes+RUNS a program, then judges "exactly one reasonable reading → one integer"; strict (flags dominant-reading ambiguity + vacuous conditions). n=50/version, ±6pp.
+- **trainable/joint** = in-band ∧ verifiable ∧ labeled.
+- **learnable-area yield (absolute)**: RL divfix Stage-A rollouts 9→25 per 240/step (84 total over ~2h×4GPU, discarded); divfix Stage-B 479/2,243=21% (collapsed); v2 pipeline-real 249/3,000=8.3% (diverse); v3 strong-standard ~23%.
+
+### Diversity enforcement (SFT loop): by construction, 4 layers — skill-flat strata in target; difficulty strata; ALWAYS retrain from base (v1/v2/v3 each from base → drift cannot compound); eff-skills regression tripwire per round. vs RL: Vendi novelty reward (saturated step 3, protected only wording).
+
+### DPW targets for the questioner: trainable ≥40%, label-acc ≥90% (✓ K=10/≥6 by construction), well-formed ≥96% ON CURRICULUM (post-verification — raw-gen 96% not realistic for 4B at difficulty). Path to 40%: in-band 33→50% (bigger hard-stratum via joint-mined pool ~200 examples + epochs-as-fidelity) × P(usable|band) 70→85% (**scratchpad self-check** — draft→test-constraints→emit format, few-shot/SFT on our ~30 labeled ill-posed failures). Batch size NOT a lever (saturated at n=136); LR only damps amplification.
+
+### v4 plan (approved direction: SFT-only, no GRPO yet): mine all v2+v3 probe sweet-spots (→~200 verified joint examples) + scratchpad self-check format + difficulty strata → SFT → probe. Gates: trainable ≥30% (pipeline-real), well-formed|trainable ≥92%, eff-skills ≥7.
+### Open items: v3→vLLM conversion fails at smoke (processor-file glob bug — fix: copy preprocessor configs from sftq_v2/vllm); judge eff-skills on the 249-row curriculum; Unity holds (2d + 14d) still queued; solver GRPO + Oly-675 eval deliberately deferred.
+
+---
+
 ## 2026-07-02 — v2 measured fully (joint=20%); SECOND selection bias found (difficulty); v3 launched (stratified joint-boosted target); loop design converged.
 
 **v2 complete measurements (1,200-gen probe + judge battery):** digit 20% / eff-skills 6.6 (>base 6.2) / well-posed 88% / verifiable 92% / prefix-unique 99% / format 99.7%. Self-label correctness 9% (≈base 14% — SFT can't teach solving; labels come from program consensus, fine). **Difficulty (LLM proxy, n=60): trivial 48% / sweet-spot 28% / too-hard 23%** vs base 0/25/75. ⇒ **SECOND selection-bias axis: the verified-only target + SFT amplification skewed output EASY** (too-hard mass → trivial mass). Golden set's natural difficulty was ~uniform (92/89/87), so the 48% trivial is mostly AMPLIFICATION of the easy mode. Lesson: **the SFT target must be balanced on EVERY axis the filter touches** (skill AND difficulty), and epochs amplify whatever the target is (fidelity knob, not quality knob — more epochs on a bad target = worse).
