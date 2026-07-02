@@ -4,6 +4,98 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-02 — v2 measured fully (joint=20%); SECOND selection bias found (difficulty); v3 launched (stratified joint-boosted target); loop design converged.
+
+**v2 complete measurements (1,200-gen probe + judge battery):** digit 20% / eff-skills 6.6 (>base 6.2) / well-posed 88% / verifiable 92% / prefix-unique 99% / format 99.7%. Self-label correctness 9% (≈base 14% — SFT can't teach solving; labels come from program consensus, fine). **Difficulty (LLM proxy, n=60): trivial 48% / sweet-spot 28% / too-hard 23%** vs base 0/25/75. ⇒ **SECOND selection-bias axis: the verified-only target + SFT amplification skewed output EASY** (too-hard mass → trivial mass). Golden set's natural difficulty was ~uniform (92/89/87), so the 48% trivial is mostly AMPLIFICATION of the easy mode. Lesson: **the SFT target must be balanced on EVERY axis the filter touches** (skill AND difficulty), and epochs amplify whatever the target is (fidelity knob, not quality knob — more epochs on a bad target = worse).
+
+**JOINT (difficult∧verifiable) measured for v2: ~20%** (28% in-band × 71% of sweet-spots verifiable; all 5 sweet-spot failures = ambiguity/contradiction — hard end is the ill-posed end, anti-correlation confirmed). vs divfix RL questioner 4–10%. Joint is the scarce resource; optimize BOTH at once (verifiability already saturated at 92% — sequencing moot; anti-correlated axes oscillate if done sequentially; SFT=distribution-matching makes joint-target free).
+
+**v3 LAUNCHED (job 982601):** golden_set_v3 = 136 ex, **skill-flat × difficulty-stratified** (56% sweet-spot / 26% too-hard / 18% trivial) + **12 v2-mined joint examples** (self-distillation: v2's own verified sweet-spot output — ~200 more minable from the 1,010 probe gens). 2 epochs (balanced target → fidelity now wanted). **Gate: joint ≥30%, eff-skills ≥6, verifiable ~90%.**
+
+**Loop design converged (DPW):** re-measure difficulty EVERY round vs current solver (difficulty is a relation, not a property; tags ephemeral); **gradient buckets** = solve-rate deciles from Stage-B band (n=9 → 5 honest buckets, SE≈0.16) replacing the trivial/sweet/hard trichotomy; diversity via skill-flat strata + prefix dedup now, + kernel-novelty admission (taxonomy-free) rounds 2+; explicit digit-cap RETIRED after v2 (replaced by strata + IPW planned). Round template: **generate → measure (verify + solve-rate gradient) → curate (skill-flat × gradient-spread, novelty, joint-boosted) → SFT → probe.**
+
+**Compute:** Empire queue reopened; 1-GPU jobs start in minutes, 4-GPU sftsel Stage-B-only (982595, SKIP_STRAIN — curriculum measurement w/o solver train per DPW "don't run eval yet") queued. **Unity 14-day 4×A100 hold submitted (61384319)** — full pipeline env already exists there (`/work/pi_general_dartmouth_edu/dylan/envs/rzero`: verl 0.8+vllm 0.23+tilelang+R-Zero); prior hold ran Jun 18–22 and was voluntarily released during Empire migration (lesson: don't release until campaign done). wandb netrc installed on Empire (was missing). verify.py + reward-service patched w/ DUMP_VERIFY_DIR (verifier programs+outputs now persisted; was deleted-after-run).
+
+---
+
+## 2026-07-01 — SFT-selected run LAUNCHED (Empire). Round-0 result: selection-bias + SFT-amplification MEASURED; quota fix applied (v2).
+
+**sftq_v1** (Empire job 982543, 1×H100): Qwen3.5-4B SFT on golden_set_v1 = 268 verified base questions (strong-verifier labels), exact Stage-A prompt, completion-masked, lr 5e-6, 2 epochs. Env gotchas fixed: compute nodes need `~/extralib` in LD_LIBRARY_PATH (libcrypt.so.2) + HF_HOME on lustre; text-only `save_pretrained` config breaks vLLM (Qwen3_5TextConfig vs Qwen3_5Config) → probe uses HF generate; TODO convert ckpt for vLLM before 10k-scale gen.
+
+**Probe (1,200 gens) vs baselines:**
+| | base | golden v1 (target) | sftq_v1 output |
+|---|---|---|---|
+| digit share | 25% | **39%** | **50%** |
+| eff-skills | 6.2 | 5.6 | 4.9 |
+| format parseable | ~99% | — | 99.5% |
+| prefix-unique | 80% | — | **85%** |
+| well-posed | ~74–86% | — | 88% |
+| verifiable (strong) | 85% | — | 86% |
+
+**TWO mechanisms measured separately:** (1) **verify-selection bias**: base 25% → verified-subset 39% digit (DPW's homogenization argument, live at round 0); (2) **SFT mode-amplification**: target 39% → output 50% (+11pp head-of-distribution amplification, 2 epochs on 268 ex). Format/uniqueness/well-posedness all fine — ONLY the skill mixture regressed, and the pre-registered skill-entropy monitor caught it.
+
+**Fix (v2, job 982567):** golden_set_v2 = 202 ex, digit capped at **17%** (anticipating +10pp amplification → ~27% output ≈ base), all other skills kept; 1 epoch instead of 2. Full audit of golden v1 composition (13-agent workflow): digit 39%, divisor 21%, comb 10%, NT-special 10%, mod 8%, poly 8%, seq 3%, geo 0.4%.
+
+**Empire queue OPEN tonight** (5 pending vs 100s earlier); jobs start in ~minutes. Watchers active. Next: v2 probe → if digit ~25%/eff-skills ~6 → scale to 10k generation → verify (K=10) → curriculum → solver GRPO (nopack recipe, attribution-clean) → Oly-675 vs 0.6415.
+
+**V2 RESULT — QUOTA FIX WORKED, GATE PASSED:** sftq_v2 (202 ex, digit capped 17%, 1 epoch) output: **digit 20%** (v1 50%, base 25%) · **eff-skills 6.6** (> base 6.2!) · well-posed 88% · verifiable+label 88–92% · format 99.7% · prefix-unique 99%. First questioner simultaneously MORE skill-diverse than base AND better-posed AND more verifiable. Calibration landed (17% target + ~+10pp amplification → 20%). Judge caveat: "surface variety exceeds true skill variety" — still ~all "count integers in range with condition X" (verifier-expressiveness ceiling, bounds eval upside). **Proceeding to full round:** convert ckpt for vLLM (job 982582: text→multimodal key remap + smoke) → Stage B w/ sftq_v2 questioner (gen→band→judge, DUMP_VERIFY_DIR on) → Stage C solver GRPO (nopack recipe unchanged) → Oly-675 vs 0.6415. SFT hyperparams: lr 5e-6 cosine, 1 epoch, eff-batch 32 (2×16), ~7 steps, completion-masked, bf16, 1×H100 ~10min.
+
+---
+
+## 2026-07-01 — PROPOSED NEXT-RUN DESIGN: Lagrangian-constrained questioner reward + all-SFT single-shot (the fix for everything found this session).
+
+**Motivation (from the session's findings):** collapse = Goodhart/survivorship on a NOISY verifiability proxy (max verify → degenerate 10/10 digit monoculture); the useful property is the CONJUNCTION verifiable∧in-band (neither alone is a usable training example); embedding-Vendi measures SURFACE not SKILL diversity so it hid the collapse; the iterated filter+train loop is a selection ratchet that only a fixed-reference policy anchor stops.
+
+**Questioner reward (per question) — Lagrangian-constrained, joint + marginal:**
+```
+reward_i = w_D·D_i  +  μ·(v_i·b_i)  +  λ_v·v_i  +  λ_b·b_i
+  v_i = verify quality: triangular PEAK at consensus c*=0.7, =0 at ≤0.4 or =1.0  (∈[0,1]; peaked NOT max → penalizes degenerate 10/10)
+  b_i = in-band quality: 1 − 2·|solve_rate_i − 0.5|                              (∈[0,1]; peak at solve-rate 0.5, CVBAND)
+  D_i = diversity: kernel-coverage novelty (below), σ=median batch dist, + memory bank, on a SKILL embedding
+  μ·(v_i·b_i) = JOINT term: given marginals fixed, maximizes Cov(v,b) = co-occurrence (verifiable AND in-band in same Q)
+  λ_v,λ_b = Lagrangians pinning MARGINALS E[v]=v*, E[b]=b* (so one axis can't be driven while the other slides)
+```
+Covariance identity `E[v·b]=E[v]E[b]+Cov(v,b)`: marginals (λ's) set the LEVELS, product (μ) sets the CO-OCCURRENCE. Both needed.
+
+**Diversity measure (replaces Vendi as the reward):** `D_i = 1 − (1/n)Σ_{j≠i} exp(−‖x_i−x_j‖²/2σ²)`, mean over batch. Bounded [0,1], **saturating** (once a point is ≳2σ from all others D_i≈1 → no reward for further spread; rewards FILLING GAPS not infinite spread — the property Vendi lacks; Vendi is NOT asymptotic, grows with n). Distance-weighted across group+neighbors. **Must use a SKILL embedding** (solution-approach / skill-classifier), NOT question text, or you reward surface-wording diversity (the trap). Note: `diversity_penalties` in diversity.py is ~this (currently unused).
+
+**Example hyperparameters:**
+```
+VERIFIER:  VERIFY_K_PROGRAMS=10  VERIFY_MIN_AGREE=6  VERIFY_TEMPERATURE=0.6
+REWARD:    w_D=1.0  μ=1.0  v*=0.6  b*=0.6  η(dual LR)=0.05  λ init 0 clip≥−2  (PID optional)
+           λ_v ← λ_v + η(v* − mean v_i);  λ_b ← λ_b + η(b* − mean b_i)  per GRPO step
+QUESTIONER GRPO: Q_STEPS=20  rollout.n=8  train_batch=256  lr=1e-6
+           KL: use_kl_loss=true kl_loss_coef=0.05 (↑from 0.01), kl REFERENCE=FIXED base (NOT re-anchored per iter) ← anti-collapse
+           + replay 20% base-questioner Qs into each batch
+DIFFICULTY: CVBAND=1  CVLO=0.2 CVHI=0.8 (drop-filter on true solve-rate vs verified label, NOT self-consistency)
+SOLVER (Stage C) = rejection-sampling SFT (STaR/RFT): K_sol=8 solutions/verified-Q (temp1.0, 4096tok), keep answer==label, SFT 2 epochs lr=1e-5 bs64
+PIPELINE: single-shot (frozen/anchored questioner → gen ~10k → verify K=10 → rejection-SFT solver → eval). NO band-eval pre-pass (rejection sampling handles difficulty). Eval Oly-675@8192 decompose fmt/acc|fmt/pass.
+FIRST SWEEP KNOBS: μ (0.5–2), KL coef (0.03–0.1).
+```
+**Why each piece:** K=10/MIN_AGREE=6 de-noises selection; v_i peaked@0.7 (0 at 10/10) fights degenerate-verifiable; μ·v·b + 2 Lagrangians = joint+marginal targeting; fixed-base KL@0.05 + 20% replay = the real anti-collapse (stops the ratchet); CVBAND makes in-band mean solve-rate; rejection-SFT avoids RL instability. **Open problem: the SKILL-diversity signal for D_i (top objective) — surface Vendi won't do; needs solution-approach embedding or skill-classifier.** All-SFT loop (SFT questioner-target + rejection-SFT solver) = no RL Goodhart anywhere.
+
+**Compute:** ~3h on 4×H100 (no band-eval). BLOCKED: cornell saturated (jobs pending 2h+); Unity/WashU need env build (cornell has env ready). Diverse-verified-set build running cluster-free via workflow agents (w8gbghyjr).
+
+---
+
+## 2026-07-01 — CRITICAL CORRECTION (DPW's instinct): SKILL diversity DID collapse in divfix; embedding-Vendi was measuring WORDING, not reasoning.
+
+**Overrides the earlier "divfix generation-side success / diversity held" note.** LLM-judge tagged core solving-SKILL of 20 divfix questions/step (fixed taxonomy: digit-manip, divisor-factor, modular, sequence, combinatorics, polynomial, geometry, set-ops, NT-special):
+```
+step:              1     2     3     4     5     6
+digit-manip %:    25%   30%   35%   40%   50%   55%   ↑ doubles
+effective skills: 6.2   5.0   6.5   5.2   4.4   3.6   ↓ nearly halves
+holistic (1-10):   7     5     6     6     4     4
+judge verdict:  "varied"  →  "digit-manipulation monoculture (11/20)"
+```
+**SKILL diversity collapses (digit 25→55%, eff-skills 6.2→3.6) WHILE surface metrics stayed flat (exact-unique 100% all steps, Vendi_unique ~21).** ⇒ the questioner kept WORDING varied (diff numbers/phrasings) so embedding-Vendi + exact-unique MISSED the reasoning-skill collapse. z-scoring didn't prevent collapse — it HID it from the embedding metric.
+
+**Retro-explains the whole session:** Vendi 9.93/13.2 measured WORDING variety, not skill. Even divfix's curriculum was skill-collapsed to digit-manipulation → nothing new to transfer to OlympiadBench → **that's why diversity never moved the eval.** Even the BASE is only ~6 eff-skills / 25% digit (moderately skill-diverse); training narrows to ~3.6 / 55%.
+
+**Consequences:** (1) **We measured the wrong diversity all session** — use SKILL/topic diversity (LLM-judged), NOT embedding Vendi; on the skill axis EVERY run collapsed. (2) The questioner fix (anchor / SFT-to-diverse) must define its target + reward on SKILL, not surface embeddings — else you get varied-wording monoculture-skill (exactly this). Artifacts: `~/Desktop/divfix_step_samples.md` (20 Q/step), skill-judge workflow wsjqwd4dd.
+
+---
+
 ## 2026-07-01 — DESIGN PIVOT: all-SFT single-shot; the diverse-verifiable set = VERIFY THE BASE ROLLOUTS (never done before).
 
 **Key realization (DPW):** every `judge.jsonl` verified set (2292 total, only **355 unique** — 85% degenerate digit dupes) is from TRAINED (collapsed) questioners' Stage-B output. **The base questioner's diverse questions (Vendi ~20) were NEVER verified** — they only exist as unlabeled training-step rollouts. So all diversity experiments trained ON collapsed curricula; we've never had a diverse VERIFIED curriculum.
