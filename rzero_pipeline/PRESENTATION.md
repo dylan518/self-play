@@ -1,161 +1,153 @@
-# Self-Play Question Generation: From RL Collapse to Selected-SFT
-### Full investigation writeup — presentation source material
-*(R-Zero pipeline, Qwen3.5-4B, June–July 2026)*
+# Self-Play for Math Reasoning: the Full Arc
+### Qwen3 R-Zero → verified labels → RL collapse → selected-SFT
+*Presentation source material, with real examples pulled from run data. (June–July 2026)*
 
 ---
 
-## 1. The Setup
+## 0. Timeline at a glance
 
-**Goal:** a self-improving loop for math reasoning. A **questioner** generates problems, a **solver** learns from them, both co-evolve.
+| phase | what | outcome |
+|---|---|---|
+| **P1** original self-play (this repo, `grpo_math`) | generator/solver/judge, pairwise Elo, GSM8K | judge-reliability metrics built; question-DPO blocked (holdout 0.71) |
+| **P2** R-Zero replication — **Qwen3-4B** | paper's model + majority-vote pseudo-labels | eval ≈ 0.30 (matches external 0.33); base too weak — migrated |
+| **P3** R-Zero on **Qwen3.5-4B**, two arms | **majority** (vanilla R-Zero) vs **verified** (program labels) | verified clearly wins; majority labels wrong 18% |
+| **P4** the failures | U-shape, favorable-draw, band footgun, packing confound | iteration is *unreliable*: redo landed **below base** |
+| **P5** the collapse investigation | surface-vs-skill diversity, Goodhart mechanisms | every RL run skill-collapsed; metrics hid it |
+| **P6 (now)** **selected-SFT questioner** | curate → SFT from base → measure → repeat | v3: best diversity of campaign + verifier fixed |
 
-**The R-Zero pipeline (one iteration):**
-```
-A: questioner GRPO (6 steps, reward = difficulty-band + diversity + verifiability)
-B: trained questioner generates ~1000+ fresh Qs
-   → band filter (solver self-consistency 0.3–0.8, n=9 samples)
-   → program verification (judge writes K Python programs, consensus → label)
-C: solver GRPO on the verified curriculum (20 steps, n=5)
-→ eval: OlympiadBench-675 @8192 greedy (report format_rate / acc|fmt / pass)
-```
-
-**Key design detail:** the questioner's own claimed answer is *discarded* — the program-consensus label is the ground truth. (Justified: the base questioner's claimed answers are only **14% correct**.)
+⚠ Footgun that shaped P2→P3: **cross-base comparisons are invalid** (Qwen3 ≈0.30 vs Qwen3.5 ≈0.573 on the same eval — always check `config.json model_type` before comparing absolutes).
 
 ---
 
-## 2. The RL Results (what happened)
+## 1. The pipeline (R-Zero, our extension)
 
-| run | questioner | curriculum | eval (Oly-675) |
-|---|---|---|---|
-| base Qwen3.5-4B | — | — | 0.573 |
-| **nopack** | RL, collapsed to digit monoculture | 943 rows, 99% unanimous labels | **0.6415** |
-| vfix | RL + fixed-Vendi gate (failed to hold) | 507 rows, collapsed | 0.6296 |
-| divfix | RL + z-scored reward (held *surface* diversity) | 479 rows | 0.6326 |
-
-**Headline: a 3-way statistical tie (~±1.9pp SE).** Solver training works (+6–7pp over base) but *diversity of the curriculum never mattered* — and the reason turned out to be that no run ever actually produced skill diversity.
+```
+A: questioner GRPO (6 steps; reward = difficulty-band + diversity + verifiability)
+B: trained questioner → ~1–3k fresh Qs
+   → band filter: solver self-consistency ∈ [0.3, 0.8]  (n=9 samples)
+   → LABEL:  majority arm  = solver's majority answer   (vanilla R-Zero)
+             verified arm  = K-program consensus        (our change — the ONLY diff)
+C: solver GRPO on the curriculum (20 steps, n=5)
+eval: OlympiadBench @8192 greedy — always report format_rate / acc|fmt / pass
+```
 
 ---
 
-## 3. Finding #1 — The metric was lying: surface vs skill diversity
+## 2. Majority vs Verified: why program labels
 
-Embedding-based **Vendi score** (the pipeline's diversity metric) tracked *wording*, not *reasoning skill*:
+**The solver's majority vote is wrong 18% of the time** (nopack: 168/946 relabeled by programs; sftsel: 21%). Real examples — solver-majority confidently wrong, 3/3 programs agree on the truth:
 
-```
-divfix per training step:      1     2     3     4     5     6
-Vendi (unique, embedding):   21.4  21.1  21.8  22.1  22.4  21.1   ← "held diversity"
-exact-unique questions:      100%  100%  100%  100%  100%  100%   ← zero duplicates
-LLM-judged skill diversity:
-  digit-manipulation share:   25%   30%   35%   40%   50%   55%   ← DOUBLED
-  effective skills (exp-H):   6.2   5.0   6.5   5.2   4.4   3.6   ← nearly HALVED
-```
+> *"…how many n ≤ 1000 where n³−n contains a digit 7?"* — majority said **500**, programs computed **491** `['491','491','491']`
+> *"…n ≤ 1000 containing digit 7, sum f(n)…"* — majority said **667**, programs **739**
+> *"…n ≤ 2023 with digit 7 and digit …"* — majority said **382**, programs **358**
 
-**The questioner kept wording varied while collapsing the actual solving skill** — invisible to Vendi and dedup, caught only by an LLM judge tagging each question's core skill (10-tag taxonomy → eff-skills = exp(entropy)).
+**Head-to-head (OlympiadBench n=200, same protocol):**
 
-**Consequence:** every "diverse" curriculum was really an enumerate-→-integer monoculture in varied clothing. That's why eval never moved: nothing new to transfer.
+| arm | eval | vs base |
+|---|---|---|
+| base Qwen3.5-4B | ~0.33 | — |
+| **majority (vanilla R-Zero)** | 0.345 | **+1.5pp** (noise) |
+| **verified, step-20** | **0.415** | **+8.5pp** (~2.4σ) |
 
----
-
-## 4. Finding #2 — Why RL collapses: Goodhart on a noisy conjunction
-
-**The useful training question is the conjunction: difficult (in-band) ∧ verifiable.** Measured per-step joint yield (real saved data):
-
-```
-divfix step:      1    2    3    4    5    6
-verifiable(≥2/3): 16%  21%  33%  32%  44%  49%     ← reward drives this up
-in-band [.3,.8]:  25%  17%  19%  25%  22%  28%     ← ~flat
-BOTH (usable):     4%   3%   5%   6%   7%  10%     ← tiny; anti-correlated axes
-```
-(nopack pushed verifiability to **94%** — by full collapse to trivially-checkable digit questions.)
-
-**Mechanisms identified (all measured):**
-1. **Graded verify reward** `v = 2·votes/K − 1` pays 3× more for a degenerate 3/3 than a diverse 2/3 → exact gradient into the monoculture. The 3/3-unanimous set is **2.5× more templated** than the 2/3 set — *the diversity lives in the borderline region and the reward punishes it.*
-2. **Selection on noise:** verifiability is a random variable (3 programs @ temp 0.6). Filtering+rewarding on a noisy estimate → survivors are lucky + degenerate; iterating compounds it (optimizer's-curse ratchet).
-3. **Weak anchor:** KL coef 0.01, reference re-anchored each iteration → bounds per-step drift, not cumulative collapse.
-4. Difficulty band is on **self-consistency, not solve-rate**: a confidently-*wrong* question reads "too easy" and is dropped; ~18% of questions have consistency ≠ correctness (footgun; CVBAND fix exists).
-
-**Verifier reliability (measured by independent re-solving):** labels are 98% correct on the digit curriculum, 92% on the diverse one; the failure mode is *all K programs sharing one misreading* of an ambiguous question — invisible in the saved outputs. (Verifier *programs* were deleted by the pipeline; now persisted via `DUMP_VERIFY_DIR` patch.)
+Program-consensus labeling is the single change that made self-play train on *true* signal. (MATH-500: +3.8pp.) Verified-label accuracy, audited by independent re-solving: **98%** on the digit curriculum, 92% on diverse; failure mode = all K programs sharing one misreading of an ambiguous question.
 
 ---
 
-## 5. The Pivot: Selected-SFT (no RL on the questioner)
+## 3. R-Zero failures (why iteration didn't compound)
 
-**Principle: use RL only where reward = true objective (solver correctness). Where the reward is a proxy (question quality), control the distribution by *construction* — curation + SFT — instead of by a gameable reward.**
+**3.1 The U-shape.** iter1 verified = **0.630**, iter2 = **0.545** — *below base 0.573*. Step-1 repro on iter1's exact inputs matched (0.554 ≈ 0.565) ⇒ the drop is in the **inputs** (questioner's curriculum), not code.
 
-**The loop (~30 min/iteration):**
+**3.2 The favorable-draw discovery (the deepest failure).** Re-running iter1 from base with byte-identical config → **0.474, below base**. The questioner is non-deterministic (diversity-bank cold start, wall-clock reward batching, stochastic n=10 scoring) and the original 0.630 was a **lucky curriculum draw**. Same config, three outcomes: 0.630 / 0.474 / (later) 0.6415.
+
+**3.3 The band footgun.** The difficulty band filters on **self-consistency, not correctness** — a confidently-*wrong* question reads "easy" and passes/fails wrongly; iter2 had ~45% zero-gradient rows. The correctness-band fix (CVBAND): recovered 0.474→0.545 (**safety**, eliminates below-base collapse) but iter2 then found **0 learnable questions** (kept=0) → the loop **stalls instead of regressing**. Safe, not beneficial.
+
+**3.4 Infrastructure confound.** `use_remove_padding=true` (sequence packing) silently corrupts Qwen3.5's hybrid-attention gradients: **−0.12 eval**, reproduced 2×2 across attention backends (no-pack 0.621/0.633 vs pack 0.508/0.495). Never in the real loop, but it corrupted a week of repro runs. *Lesson: isolate infra changes from experiment changes.*
+
+**Final RL scoreboard (full Oly-675 @8192):** base 0.573 · **nopack 0.6415** · vfix 0.6296 · divfix 0.6326 — a 3-way statistical tie regardless of the diversity knob. Why? →
+
+---
+
+## 4. Diversity collapse — with the actual questions
+
+**The questioner collapses to a digit-manipulation monoculture under RL.** Real samples from the nopack run:
+
+**Step 1 (base questioner, before RL) — genuinely varied:**
+> • *"Let S be the set of integer solutions (x,y) to (x²−y²)(x+y)³=0 … define a sequence aₙ …"*
+> • *"…triples (x,y,z) ≤ 2023, pairwise distinct, x²+y²+z² divisible by 20…"*
+> • *"…n ≤ 1000 where trailing zeros in the **binary representation of n!** equal …"*
+> • *"…sequence a₁=n, a_{k+1}=(a_k²+1) mod 2025, with a₁₀₀ = a₀ …"*
+
+**Step 6 (after 6 GRPO steps) — one template, re-rolled:**
+> • *"…n ≤ 1000 whose decimal representation contains **a digit 7 and a digit 9** …"*
+> • *"…n ≤ 2023 containing **a digit 5 and a digit 7** …"*
+> • *"…n ≤ 1000 where the **sum of digits equals the product of digits** …"*
+> • *"…n ≤ 1000 where the **digit sum divides n** …"*
+
+**And the metrics lied about it.** Embedding-Vendi and dedup stayed flat while the LLM-judged *skill* distribution collapsed:
+
 ```
-golden set (verified base questions, strong-verifier labels)
-→ curate target (stratify on every axis the filters select on)
-→ SFT questioner FROM BASE (lr 5e-6, 1–2 epochs, eff-batch 32, completion-masked)
-→ probe: generate 1,200 → judge skill / difficulty / verifiability / joint
-→ measure, attribute, rebalance target, repeat
+divfix step:                  1     2     3     4     5     6
+Vendi (unique, embedding):  21.4  21.1  21.8  22.1  22.4  21.1   "diverse" ✗
+exact-unique questions:     100%  100%  100%  100%  100%  100%   "no dupes" ✗
+digit-manipulation share:    25%   30%   35%   40%   50%   55%   ← doubled
+effective skills (exp-H):    6.2   5.0   6.5   5.2   4.4   3.6   ← halved
 ```
-Anti-collapse by construction: skill-flat strata, difficulty strata, always-retrain-from-base (no compounding drift), eff-skills regression tripwire.
+*Varied wording, one skill.* Diversity must be measured as **exp-entropy over LLM-judged skill tags**, not embeddings.
 
-### Three iterations, each fixing a measured failure:
+**Why RL collapses (mechanisms, all measured):**
+- The **graded verify reward** (`2·votes/K − 1`) pays 3× more for a degenerate always-verifiable question than a borderline one — and the 3/3-unanimous set is 2.5× more templated. *The diversity lives exactly where the reward punishes.*
+- **Selection on a noisy proxy** (3 programs @ temp 0.6) + iteration = optimizer's-curse ratchet into the degenerate corner.
+- The usable question is the **conjunction difficult ∧ verifiable** — anti-correlated axes; per-step usable yield was only 4–10% while the reward drove verifiability 16%→94% *by collapsing*.
 
-| | base | v1 (naive) | v2 (skill-quota) | v3 (skill×difficulty strata) |
+---
+
+## 5. The pivot: selected-SFT (P6, current)
+
+**Principle: RL only where reward = true objective (solver correctness). For question *quality* — a proxy — control the distribution by construction: curate a golden set, SFT the questioner from base, measure everything, rebalance, repeat.** No reward to game, no ratchet (always retrain *from base*), ~30 min/iteration.
+
+| | base | **v1** (naive verified target) | **v2** (skill-quota) | **v3** (skill × difficulty strata) |
 |---|---|---|---|---|
-| digit share | 25% | **50%** ⚠ | 20% | 23% |
+| digit share | 25% | **50%** ⚠ collapse | 20% | 23% |
 | eff-skills | 6.2 | 4.9 ⚠ | 6.6 | **7.5** ✅ |
-| trivial/sweet/hard | 0/25/75 | — | **48**/28/23 ⚠ | 37/33/30 ✅ |
-| well-posed | 86% | 88% | 88% | 76%* |
+| trivial/sweet/hard | 0/25/75 | — | **48**/28/23 ⚠ easy-skew | 37/33/30 ✅ |
 | verifiable (strong) | 92% | 92% | 92% | 94% |
 | joint (usable) | ~18% | — | 20% | **23%** |
-| prefix-unique | 80% | 85% | 99% | 99% |
 
-*\*mix effect: P(well-posed | hard) ≈ 70% is flat across versions — a 4B generation-capability ceiling (composes constraints it can't self-check), not a data problem.*
+- **v1 re-created the diversity collapse *without RL***: the verify-filter's selection bias (base 25% → verified-subset 39% digit) + SFT mode-amplification (39% → 50%). Both mechanisms measured separately.
+- **v2** fixed skill; exposed the second bias axis (verifiability selects for *easiness* → 48% trivial).
+- **v3** stratified both axes + self-distilled its own verified sweet-spots. General law: **stratify the SFT target on every axis the downstream filter selects on.**
+- Remaining ceiling: P(well-posed | hard) ≈ 70%, flat across targets — a 4B generation-capability limit. Real failed examples: *"exactly 4 distinct a mod 7 with x²≡a"* (max is 2), *"2n ≡ 1 mod 12"* (no solutions), *"50k!"* (precedence ambiguity). Next lever: scratchpad self-check at generation.
 
-**v1 measured the two bias mechanisms separately:** verify-selection bias (base 25% → verified-subset 39% digit) and SFT mode-amplification (target 39% → output 50%). **v2's fix exposed the second bias axis:** verifiability selects for *easiness* (48% trivial output). **v3 fixed both** — the general rule: *the SFT target must be stratified on every axis the downstream filter selects on.*
+**Pipeline-real result (Stage B, 3,000 generations from the SFT questioner):**
+```
+in-band (real n=9 band):     301/3,000 = 10%    (easy-skew tax — v4's target)
+K=10 MIN_AGREE=6 consensus:  249/301  = 83%     ← verifier bottleneck FIXED (was 16–48% @K=3)
+TRAINABLE: 249 = 8.3% at full diversity          vs divfix RL: 21% but 77%-digit monoculture
+```
+
+**K=10 verification in action (persisted for the first time)** — *"How many N, 0≤N≤99, have #(multiples of 5 below N) = #(multiples of 7 below N)?"* → 10 programs: `[9,9,9,9,9,`**`10`**`,9,9,9,9]` → votes 9/10, label **9** (the dissenter mishandled the N=0 boundary). Consensus catches exactly this.
+
+**Cost:** learnable questions per GPU·hour at held diversity — RL ~10–40 (rollouts then discarded) vs SFT ~1,500–2,500. Questioner training: 2h×4GPU+reward-service (RL) vs 10min×1GPU (SFT).
 
 ---
 
-## 6. Pipeline-Real Measurement (Stage B with the SFT questioner)
+## 6. Transferable lessons
 
-First end-to-end run of the SFT questioner through the actual pipeline (v2 checkpoint, 3,000 generations):
-
-```
-in-band (real n=9 band):      301 / 3,000 = 10%     (easy-skew tax — the v3/v4 target)
-K=10, MIN_AGREE=6 consensus:  249 / 301  = 83%      ← VERIFIER BOTTLENECK FIXED
-                                                       (was 16–48% at K=3)
-TRAINABLE:                    249 / 3,000 = 8.3% at full diversity
-label agreement (majority vs program): 79%
-verifier programs persisted (first time): 301 rows
-```
-
-**vs the RL questioner (divfix): 21% trainable but 77%-digit monoculture.** The whole remaining gap is the difficulty axis — the RL band-reward is genuinely good at difficulty-targeting; the SFT loop closes it with target composition instead of a gameable reward.
-
-**Cost comparison (learnable-area questions per GPU·hour, at held diversity):**
-```
-RL diverse phase:   ~10–40 /GPU·h  (and Stage-A rollouts are discarded)
-selected-SFT:    ~1,500–2,500 /GPU·h  (generation-bound, embarrassingly parallel)
-questioner training: 2h × 4 GPU (RL + reward service)  vs  10 min × 1 GPU (SFT)
-```
+1. **Label with programs, not majority votes** — majority is wrong ~18–21%; program consensus is the single biggest win of the project (+7pp over majority).
+2. **Measure skill diversity, not embedding diversity** — Vendi hid a full collapse.
+3. **Gate, don't grade, noisy proxies** — graded rewards on noisy quality estimates are collapse gradients (Lagrangian form kept on the shelf: `E[v]=v*, E[b]=b*` marginals + `μ·v·b` co-occurrence).
+4. **The conjunction (difficult ∧ verifiable) is the scarce resource** — anti-correlated; optimize jointly, never sequentially.
+5. **Stratify the SFT target on every filter axis** — un-stratified axes leak selection bias into the clone, then amplify (epochs = fidelity knob, not quality knob).
+6. **Always retrain from base** — kills compounding drift with zero machinery.
+7. **De-noise the verifier with K** (K=10 majority): 83% consensus, enables IPW via votes/K.
+8. **Self-play iteration is a variance problem before it is a learning problem** — 0.630 vs 0.474 from identical configs; guardrails (CVBAND) make it safe, not beneficial. Reliability must come from the curriculum-construction side.
+9. **Persist everything** (verifier programs, per-step band/votes) — the investigation was rate-limited by discarded intermediates.
 
 ---
 
-## 7. Design Contributions (transferable)
+## 7. Where we are & what's next
 
-1. **Measure skill diversity, not embedding diversity.** exp-entropy over LLM-judged skill tags; embedding-Vendi provably hid a full collapse.
-2. **Gate, don't grade, noisy proxies.** Any graded reward on a noisy quality estimate (verifiability, difficulty) is a collapse gradient. If rewarding at all: binary gates at thresholds, or the Lagrangian form (marginal constraints `E[v]=v*, E[b]=b*` + product term `μ·v·b` for co-occurrence — covariance identity separates levels from coupling). Kept on the shelf; SFT curation achieves the same by construction.
-3. **The conjunction (difficult ∧ verifiable) is the scarce resource** — the axes are anti-correlated (hard ⇒ more ill-posed; verifiable ⇒ easier). Optimize both at once; sequential passes undo each other.
-4. **Stratify the SFT target on every filter axis** (skill, difficulty, pass-probability/IPW) — every un-stratified axis leaks its selection bias into the clone, then amplifies.
-5. **Always retrain from base** — kills compounding drift without any KL machinery.
-6. **De-noise the verifier with K** (K=10, majority): fixed the label bottleneck outright (83% consensus) and enables inverse-propensity weighting via votes/K.
-7. **Persist everything** (verifier programs, per-step band/votes): the entire investigation was rate-limited by discarded intermediate data.
-8. **Epochs are a fidelity knob, not a quality knob** — they amplify whatever the target is.
+**Now:** SFT-questioner quality campaign (solver GRPO deliberately deferred until question gates pass).
+Targets: **trainable ≥40%** (at 8.3→23% depending on standard), **label-acc ≥90%** (✓ by K=10 construction), **well-formed ≥96% on-curriculum**.
 
----
-
-## 8. Current State & Next Steps
-
-**Scoreboard (questioner quality, the current focus — solver GRPO deliberately deferred):**
-- v3: eff-skills 7.5, balanced difficulty, joint 23% (strong standard), 8.3% pipeline-real (v2)
-- Targets: **trainable ≥40%, label-acc ≥90% (✓ by K=10 construction), well-formed ≥96% on-curriculum**
-
-**v4 (in progress):**
-- Mine v2+v3 probes → ~200 verified sweet-spot (joint) examples → 3× bigger hard stratum
-- **Scratchpad self-check** generation format (draft → test constraints → emit), few-shot/SFT'd on ~30 labeled ill-posed failures — the only lever aimed at the P(well-posed|hard)≈70% ceiling
-- Path to 40%: in-band 33→50% (target fidelity) × P(usable|band) 70→85% (self-check) ≈ 42%
-
-**Then:** Stage-B on v3/v4 (pipeline-real), eff-skills on the actual curriculum, and only after question quality gates pass — solver training (rejection-SFT first, GRPO A/B) and the eval-vs-0.6415 test.
-
-**Compute:** Empire (cornell) primary; Unity 4×A100 holds queued (full pipeline env pre-existing); verifier/logging patches live on Empire.
+**v4 (next):** ~200 mined verified sweet-spots (3× hard stratum) + **scratchpad self-check** generation format (the only lever on the 70% coherence ceiling) → probe → Stage-B pipeline-real. Then: rejection-SFT vs GRPO solver A/B, and the eval-vs-0.6415 test with yield matched and diversity as the isolated variable.
