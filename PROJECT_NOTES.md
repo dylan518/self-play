@@ -4,6 +4,29 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-03/05 — THE LOOP COMPOUNDS: round-2 funnel (v4) beats round-1 on every axis; Unity 14-day hold LANDED; loop = pure pipeline measurement (all proxies retired).
+
+**The loop (DPW's spec, now the standard):** generate ~2-4k from current questioner → REAL band n=9 → REAL verify K=10 → SFT from base on survivors {in-band ∧ votes≥7/10} → repeat. No LLM-proxy judgments anywhere in the target (v1-v3's difficulty tags were proxies — retired after measuring proxy 28% vs real 10% in-band for v2).
+
+**Round funnels (pipeline-real):**
+| | round 1 (v2 questioner) | round 2 (v4) |
+|---|---|---|
+| generated | 3,000 | 2,000 |
+| in-band [0.3,0.8] n=9 | 10.0% | **12.7%** (+27% rel, ~4σ) |
+| K=10 consensus (≥6) | 83% | **87%** (saturating, per DPW's prediction) |
+| TRAINABLE | 8.3% | **11.0%** (+32% rel) |
+| majority-agrees | 79% | 76% |
+
+**Key results:** (1) v4 = SFT on 237 round-1 survivors (only filter: band ∧ ≥7/10; NO quotas) — output 94% well-posed / 100% verifiable / eff-skills 6.2 / BUT difficulty didn't move on the LLM proxy — the REAL measure shows it DID (+2.7pp in-band). (2) Verifiability saturation confirmed → round-2 rejects are ~pure difficulty rejects → each round's survivors are a purer difficulty selection. (3) 10/10-consensus bucket is NOT degenerate under the band∧verify conjunction (eff-skills 6.1, sr 0.58) — the band pre-cuts the trivial corner; divfix's "3/3=templated" was an unbanded artifact. (4) v4 target composition (24% digit / 6.4 eff-skills) landed ≈base naturally — diversity currently UNENFORCED (from-base retrain + eff-skills tripwire only). (5) Round-2 ran 2h13m end-to-end on the hold, zero queue.
+
+**Compute:** **Unity 14-day hold LANDED (61384319, gpu022, until Jul 17)** — but steps can only bind 2 of its 4 A100s (IDX 5-6 unbindable, node quirk; not worth risking the hold). Empire queue stopped serving ≥2-GPU jobs (12h+ pending). All rounds now run on the hold via `srun --overlap`. Env gotchas fixed on Unity: `~/R-Zero` symlink, verify.py DUMP patch applied, convert needs main-guard (smoke skipped — pipeline scripts are guarded). Brev is dead (shut down 6/30).
+
+**Signal-efficiency analysis (DPW):** SFT-on-survivors wastes the reject signal (2,763 graded rejects discarded/round); GRPO uses all of it — but old Stage-A was 1-GPU-reward-service/3-idle (~90% reward measurement, ~5% gradient math; ~5.5 vs ~2 GPU-min per measured question). Fix = phase-synchronous layout (all GPUs per phase) → GRPO arm ~2.5× faster; gated binary reward 1{band ∧ ≥7/10} + KL-to-base = the defensible A/B arm vs the SFT loop. Difficulty is the axis where RL's per-example pressure has the edge (divfix RL hit 24% in-band).
+
+**Next:** v5 = SFT on cumulative pool (round-1 237 ∪ round-2 ≥7/10 survivors ≈ ~440) → round 3; watch whether in-band keeps climbing (→15%+) or plateaus. GRPO 4-GPU-efficient patch (N_SVC=4 colocated) staged for the A/B.
+
+---
+
 ## 2026-07-02 — STAGE-B PIPELINE-REAL RESULT (v2 questioner): trainable 8.3%, K=10 verifier FIXED (83% consensus); v3 measured (joint 23%, eff-skills 7.5); campaign notes consolidated.
 
 ### Stage-B run (Empire job 982595, completed 07:48 — first pipeline-real measurement of an SFT questioner)

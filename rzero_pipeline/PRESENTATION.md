@@ -151,3 +151,88 @@ TRAINABLE: 249 = 8.3% at full diversity          vs divfix RL: 21% but 77%-digit
 Targets: **trainable ≥40%** (at 8.3→23% depending on standard), **label-acc ≥90%** (✓ by K=10 construction), **well-formed ≥96% on-curriculum**.
 
 **v4 (next):** ~200 mined verified sweet-spots (3× hard stratum) + **scratchpad self-check** generation format (the only lever on the 70% coherence ceiling) → probe → Stage-B pipeline-real. Then: rejection-SFT vs GRPO solver A/B, and the eval-vs-0.6415 test with yield matched and diversity as the isolated variable.
+
+
+---
+
+# Appendix: Full Example Questions (verbatim from run data)
+
+
+## A. Diversity collapse — nopack questioner
+
+### Step 1 (base, pre-RL):
+
+
+**Step 1 (base, pre-RL) — Q1.** Let $S$ be the set of all positive integers $n$ such that the decimal representation of $n$ contains no digit strictly greater than $4$, and the sum of the digits of $n$ is a perfect square. Furthermore, for any $n \in S$, let $f(n)$ be the number of trailing zeros in the decimal representation of $n$. Determine the number of elements in $S$ such that $f(n) \ge 2$ and $n < 100,000$.
+
+
+**Step 1 (base, pre-RL) — Q2.** Let $S$ be the set of all triplets of positive integers $(x, y, z)$ such that: 1. $x, y, z \le 50$, 2. $x \neq y$, $y \neq z$, and $z \neq x$, 3. $x + y \mid x + z + 7$ and $x + z \mid x + y + 7$. Find the number of distinct values of $x + y + z$ that can be formed by triplets in $S$.
+
+
+**Step 1 (base, pre-RL) — Q3.** Let $S$ be the set of all integers $x$ such that $1 \le x \le 1000$ and $x$ can be written as the sum of at least two distinct powers of 2 (i.e., $x = \sum_{k \in K} 2^k$ where $K \subseteq \mathbb{Z}_{\ge 0}$, $|K| \ge 2$). For each $x \in S$, define $f(x)$ to be the number of ways to write $x$ as a product of two integers greater than 1. Calculate the sum $\sum_{x \in S} f(x)$.
+
+
+### Step 6 (after 6 GRPO steps — the digit template):
+
+
+**Step 6 (after RL) — Q1.** Let $S$ be the set of all integers $n$ such that $1 \le n \le 1000$ and the binary representation of $n$ contains at least two '1's, but does not contain the substring "11" (i.e., no two consecutive 1s). For each $n \in S$, let $d(n)$ be the number of divisors of $n$. Compute the sum $\sum_{n \in S} d(n)$.
+
+
+**Step 6 (after RL) — Q2.** Let $S$ be the set of all integers $n$ such that $1 \le n \le 2024$ and the decimal representation of $n$ contains at least one digit '7'. For each $n \in S$, let $d(n)$ denote the number of '7's in the decimal representation of $n$. Compute the sum $\sum_{n \in S} d(n)$.
+
+
+**Step 6 (after RL) — Q3.** Let $S$ be the set of all integers $n$ such that $1 \le n \le 2024$ and the sum of the digits of $n$ in base 10 is divisible by 3. Let $f(n)$ be the number of divisors of $n$. Compute the value of $\sum_{n \in S} f(n) \pmod{1000}$.
+
+
+## B. Majority-vote label wrong (solver majority vs 3/3 program consensus)
+
+
+**B1.** Let $S$ be the set of all integers $n$ such that $1 \le n \le 2023$ and the decimal representation of $n$ contains at least one digit equal to $7$ and at least one digit equal to $3$. Find the number of such integers $n$.
+
+> solver-majority: **107** — programs (3/3): **108**
+
+
+**B2.** Let $S$ be the set of all integers $n$ such that $1 \le n \le 1000$ and the decimal representation of $n^3 - n$ contains at least one digit equal to $7$. How many such integers $n$ are in $S$?
+
+> solver-majority: **500** — programs (3/3): **491**
+
+
+**B3.** Let $S$ be the set of all integers $n$ such that $1 \le n \le 1000$ and the decimal representation of $n$ contains at least one digit equal to 7. For each $n \in S$, let $f(n)$ be the number of distinct digits present in the decimal representation of $n$. Compute the sum $\sum_{n \in S} f(n)$.
+
+> solver-majority: **667** — programs (3/3): **739**
+
+
+## C. Ill-posed 'hard' questions (v3 sweet-spot failures — the coherence ceiling)
+
+
+**C1.** How many integers $x$ with $1 \le x \le 1000$ are such that the equation $x^2 \equiv a \pmod 7$ has exactly 4 distinct solutions for $a \pmod 7$?
+
+> why it fails: Incoherent: no a mod 7 gives 4 solutions to x^2=a (max 2); 'exactly 4 distinct a values' (QRs {0,1,2,4}) is a property of the modulus, independent of x. Readings give 1000, 0, or 858 - no single integer.
+
+
+**C2.** A sequence $a_n$ is defined by $a_1 = 2$ and $a_{n} = a_{n-1} + 5$ for $n > 1$. Another sequence $b_n$ is defined by $b_1 = 3$ and $b_{n} = b_{n-1} + 7$ for $n > 1$. Let $S$ be the number of positive integers $n \leq 100$ such that $a_n \equiv b_n \pmod{12}$. Find the smallest prime factor of $S$.
+
+> why it fails: S=0: 2n=1 mod 12 impossible, so no n satisfies congruence; smallest prime factor of 0 undefined
+
+
+**C3.** Find the number of positive integers k less than 1000 such that k is not divisible by any integer greater than sqrt(k).
+
+> why it fails: Literal reading trivial: k divides itself and k>sqrt(k) for k>1, so only k=1 qualifies (answer 1). Intended reading (no PROPER divisor > sqrt(k)) gives 1, primes, prime squares = 180. Brute force confirms both.
+
+
+## D. GOOD v3 questions (in-band AND verified — the target product)
+
+
+**D1.** How many triangles can be formed by the vertices $V = \{1, 2, \dots, 12\}$ such that for any two vertices $v_1, v_2$ in the triangle, $|v_1 - v_2|$ is divisible by at least one of the integers in $\{2, 3, 5, 7\}$?
+
+> verified answer: **112**
+
+
+**D2.** How many positive integers $n \le 1000$ are such that $n$ divides $2^n - 1$?
+
+> verified answer: **1**
+
+
+**D3.** Let $S$ be the set of ordered pairs $(a, b)$ of integers such that $1 \le a, b \le 50$ and $a + b \le 100$. Find the number of pairs in $S$ such that $a^2 + b^2$ is a perfect square.
+
+> verified answer: **52**

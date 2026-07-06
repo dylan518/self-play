@@ -40,8 +40,15 @@ Q_STEPS=${Q_STEPS:-6}; S_STEPS=${S_STEPS:-20}; Q_NPROMPTS=${Q_NPROMPTS:-512}
 # questioner batch must be small or the reward call stalls. Solver batch stays canonical.
 Q_TBATCH=${Q_TBATCH:-60}; Q_MINI=${Q_MINI:-12}            # 60 prompts x n4 = 240 questions/step (÷3 GPUs ok)
 GEN_GPUS=${GEN_GPUS:-1,2,3}; SVC_GPU=${SVC_GPU:-0}
-N_SVC=${N_SVC:-1}   # DP reward-service replicas (1=GPU0 only; 2=GPUs 0,1 with training on 2,3)
-if [ "$N_SVC" -ge 2 ]; then SVC_GPUS="0 1"; Q_TRAIN_GPUS=${Q_TRAIN_GPUS:-2,3}; else SVC_GPUS="${SVC_GPU}"; Q_TRAIN_GPUS=${Q_TRAIN_GPUS:-1,2,3}; fi
+N_SVC=${N_SVC:-1}   # DP reward-service replicas (1=GPU0 only; 2=GPUs 0,1 w/ training on 2,3; 4=COLOCATED: services AND training share ALL GPUs)
+if [ "$N_SVC" -ge 4 ]; then
+  # Phase-synchronous layout: training GPUs idle during the (synchronous) reward call anyway,
+  # so colocate 4 low-mem service replicas WITH training on all 4 GPUs -> ~4x reward throughput
+  # vs the legacy 1-scores/3-idle layout. Memory split: services 0.30, rollout 0.35, FSDP offloaded.
+  SVC_GPUS="0 1 2 3"; Q_TRAIN_GPUS=${Q_TRAIN_GPUS:-0,1,2,3}
+  SVC_MEM=${SVC_MEM:-0.30}; Q_GPU_MEM=${Q_GPU_MEM:-0.35}; FSDP_OFFLOAD=${FSDP_OFFLOAD:-true}
+elif [ "$N_SVC" -ge 2 ]; then SVC_GPUS="0 1"; Q_TRAIN_GPUS=${Q_TRAIN_GPUS:-2,3}; else SVC_GPUS="${SVC_GPU}"; Q_TRAIN_GPUS=${Q_TRAIN_GPUS:-1,2,3}; fi
+SVC_MEM=${SVC_MEM:-0.85}
 S_TRAIN_GPUS=${S_TRAIN_GPUS:-0,1,2,3}                      # solver gets all 4 GPUs (no svc), TP=2
 MINSC=${MINSC:-0.3}; MAXSC=${MAXSC:-0.8}
 GG=(${GEN_GPUS//,/ })
@@ -97,7 +104,7 @@ if [ "${SKIP_QTRAIN:-0}" != "1" ]; then
   RUN_ID=$(date +%s%N); export RUN_ID
   SVC_PIDS=(); _si=0
   for _sg in $SVC_GPUS; do
-    CUDA_VISIBLE_DEVICES=$_sg SERVICE_MAX_MODEL_LEN=8192 SERVICE_GPU_MEM=0.85 VERIFY_SUBSAMPLE=$VERIFY_SUBSAMPLE \
+    CUDA_VISIBLE_DEVICES=$_sg SERVICE_MAX_MODEL_LEN=8192 SERVICE_GPU_MEM=$SVC_MEM VERIFY_SUBSAMPLE=$VERIFY_SUBSAMPLE \
       setsid $PY $RZERO/vllm_service_init/start_vllm_server.py --port $((5000+_si)) --model_path $SOLVER_MODEL > $STORAGE_PATH/svc_${TAG}_${_si}.log 2>&1 &
     SVC_PIDS+=($!); _si=$((_si+1))
   done
