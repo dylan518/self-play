@@ -4,6 +4,47 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-09 — ROUND 3 (v5, WashU): in-band 21.8% (~doubled), trainable 19.4%; DIGIT RATCHET TRIPPED (48% of survivors) → v6 target needs a composition cap. WashU = new instant-access compute lane.
+
+**Context:** Unity's 14-day hold was cancelled Jul 7 by the PC session (chasing a 4-GPU-bindable node; replacement `dylan-4a100-v2` 61530885 still PENDING; sftq_v5 retry 61576638 PENDING) → zero GPU access. Discovered **WashU ENGR `general-gpu` partition: 16× A100-SXM4-80GB (4 nodes), 2 nodes idle, INSTANT allocation** (submit with `-A engr-lab-jiaxinh`; login `ssh washu`, user jiaxinh — Jiaxin's lab account, give him a heads-up before long occupancy). June staging survived on node-local `/scratch/jiaxinh` of **a100s-2305**: env `envs/rzero` (torch 2.11/vllm 0.23/transformers 5.12.1) + 8.8G HF cache. 7-day walltime (21 on `general-gpu-long`).
+
+**Round-3 run (jobs 97078→97079→97113 on a100s-2305):** SFT from base on golden_set_v5 (253 ex = Gemma-dedup@0.93 of r1∪r2 ≥7/10 pool; lr 1e-5, 3 epochs — PC session's deltas) → convert (enforce_eager) → Stage B: **NUM_SAMPLES is PER-SHARD** → 2000×4 GPUs = 8,000 sampled / 6,785 valid, n=9 band, K=10 MIN_AGREE=6, dumps on.
+
+**Round-3 funnel (vs r1/r2):**
+| | r1 (base→v2 gen) | r2 (v4) | **r3 (v5)** |
+|---|---|---|---|
+| generated (valid) | 3,000 | 2,000 | 6,785 |
+| in-band [0.3,0.8] | 10.0% | 12.7% | **21.8%** (1,476) |
+| K=10 consensus ≥6 | 83% | 87% | **89.1%** (1,315) |
+| TRAINABLE | 8.3% | 11.0% | **19.4%** |
+| majority-agrees | 79% | 76% | **70%** (dropping = questions outrunning majority vote, expected) |
+| ≥7/10 survivors | 237 | 207 | **1,254** (10/10:889, 9:187, 8:113, 7:65; mean sr 0.61) |
+
+**Collapse check (nopack lesson — in-band jumps must be diversity-audited):** NOT a template collapse — 98.7% exact-unique, top in-band 70-char prefix covers 2% (nopack collapsed to 2 prefixes/234 of 240), in-band uniq-prefix 56%. Non-digit-only in-band = **17.9%**, still > r2's 12.7% overall ⇒ difficulty gain is real, not pure digit-skew. **BUT the digit ratchet is confirmed and compounding:** base 25% → v4 out 27% → r2 survivors 31.5% → **r3 out 34.3% → r3 in-band 46% → r3 ≥7/10 survivors 48.2%** (digit Qs go in-band at 29% vs 18% non-digit → selection enriches; SFT amplifies). Unchecked, v6 ≈ 50% digit target = v1 failure in slow motion. **v6 target build: cap digit at ~25-30% (drop lowest-vote digit rows), keep all non-digit survivors.**
+
+**WashU env failures fixed (all one disease):** compute nodes exec-fail Kerberos-gated mounts with `[Errno 126] Required key not available` — hit `gzip` (tar → extract on LOGIN node instead), `nvcc` (torch.compile/inductor shells out → **`WORKER_ENFORCE_EAGER=1`**, hook already in all pipeline vLLM launchers), and `HF_DATASETS_CACHE=/storage1/...` inherited from jiaxinh's `.bashrc` via Slurm submit-env (judge crash → export `HF_DATASETS_CACHE=$SC/hf/datasets` explicitly). Also `PATH=/usr/bin:...` first. ~/R-Zero → `~/R-Zero_v5` (Unity round-2 lineage); June majority-eval tree preserved at `~/R-Zero_june_majority`.
+
+**Artifacts:** `washu:~/v5r3_artifacts/` (judge jsonl w/ K=10 program outputs, verified parquets, all_questions.jsonl 6,785 rows, verify_rollouts dumps); scripts `washu:~/v5stage/`; run dir `/scratch/jiaxinh/v5run/sftsel_run3` (node-local a100s-2305). Local copies `/tmp/washu_stage/`.
+
+**Pending:** [ ] v6 = SFT from base on digit-capped cumulative pool (r1∪r2∪r3 ≥7/10, Gemma dedup, digit ≤~28%) → round 4 on WashU [ ] heads-up to Jiaxin re: sustained WashU use [ ] eff-skills judge on r3 survivors (proxy check: digit≠only diversity axis) [ ] Unity pending jobs (hold v2 + sftq_v5 retry) = redundant once WashU lane confirmed — cancel or keep as backup [ ] fold r3 numbers into PRESENTATION.md [ ] backup v5r3 artifacts off node-local scratch (→ Desktop/HF)
+
+---
+
+## 2026-07-06 — PC made the DEFAULT machine (all cluster creds migrated); notes fork discovered & merged (Mac had the 07-03/05 round-2 entry); redundant Empire relaunch cancelled; Unity hold currently IDLE — v5 not yet launched.
+
+**Notes fork (fixed here):** three divergent PROJECT_NOTES copies existed — Empire's (stale, top entry 06-16), this PC's (Mac snapshot of Jul 2 + a since-corrected 07-06 status entry), and the Mac's (authoritative, with the 07-03/05 round-2 entry). This file is now the MERGE (Mac content + this entry) and the PC is the canonical copy going forward. Also pulled the Mac's newer `rzero_pipeline/R-Zero/scripts/iteration_rzero.sh` (N_SVC=4 colocated phase-synchronous layout for the GRPO A/B arm).
+
+**Empire sftsel_r2 post-mortem (982925/982976/983042):** root cause = `~/convert_vllm_v4.py` ran its vLLM smoke at module top level → vLLM v1 spawn child re-imports `__main__` → multiprocessing bootstrapping RuntimeError → CONVERT_FAILED. Patched on Empire with a `main()` guard (backup `~/convert_vllm_v4.py.bak_mpguard`) and relaunched as 985844 — then **CANCELLED as redundant** once the Mac notes surfaced: round 2 had already completed on the Unity hold Jul 3-5 (Empire queue had stopped serving ≥2-GPU jobs, hence the abandonment). Net: Empire's convert script is now guarded and usable if its queue recovers; no compute wasted (985844 never left PENDING).
+
+**Unity hold status (checked Jul 6 ~17:45 ET):** 61384319 RUNNING on gpu022, 3d15h elapsed, until Jul 17 — **GPUs 0%/0MiB = idle; v5/round-3 NOT launched yet.** Work dir `/work/pi_general_dartmouth_edu/dylan/` has round-2 artifacts (sftsel_run2, unity_round2{,b}.sh, ckpts). Next per 07-03/05 entry: v5 = SFT on cumulative pool (~440 survivors) → round 3.
+
+**Machine migration (PC = default computer now):** copied from the Mac to PC: `empireai_ed25519(+pub,totp)`, Mac `id_ed25519`→`unity_ed25519`, `evo-proj.pem`, `~/.netrc` (wandb, also as `_netrc`), gh CLI auth (`~/.config/gh` + AppData; gh binary not yet installed on PC), `~/.brev` (+ Windows `cloudflared.exe`, though **Brev is dead — shut down 6/30, tunnel hostname gone**), GOOGLE/TAVILY/XAI API keys → Windows user env vars. PC `~/.ssh/config` now has working `empire` + `unity` aliases (both verified) plus `washu`, `washu-lab`, `tulu`, `personal-gpu`, `awesome-gpu-name0` entries. Empire/Unity checks no longer require the Mac awake.
+
+**Pending:** [ ] launch v5 on the Unity hold (idle burn until Jul 17 otherwise) [ ] sync this merged notes file back to Mac + Empire copies [ ] install gh CLI on PC [ ] judge battery items carried from 07-02 (eff-skills|trainable on the 249-row curriculum)
+
+---
+
+
 ## 2026-07-03/05 — THE LOOP COMPOUNDS: round-2 funnel (v4) beats round-1 on every axis; Unity 14-day hold LANDED; loop = pure pipeline measurement (all proxies retired).
 
 **The loop (DPW's spec, now the standard):** generate ~2-4k from current questioner → REAL band n=9 → REAL verify K=10 → SFT from base on survivors {in-band ∧ votes≥7/10} → repeat. No LLM-proxy judgments anywhere in the target (v1-v3's difficulty tags were proxies — retired after measuring proxy 28% vs real 10% in-band for v2).
