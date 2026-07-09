@@ -4,6 +4,14 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-09 — GATED-GRPO ARM AUTOPSY (PC session's v5_grpo_full, Unity 61531832, ran Jul 8; result was only in the sbatch header, recording here): INVERSE-nopack collapse — gate starved (0.9% fire rate from BASE start), diversity term became the only live gradient → policy dissolved into maximally-novel UNVERIFIABLE soup.
+
+Reward = 1{band[0.3,0.8] ∧ votes≥7/10} + 0.5·D (program-embedding novelty, floor 0.5), 20 GRPO steps from **base** (not v4 — hence gate ~1% not ~11%; the divclip starvation precedent reproduced). Per-step (from `unity:$D/v5_grpo/artifacts/*/v5_batches.md`): gate 0.9%→0.0%, votes≥7 16.8%→0.9%, **votes=0 59%→96%**, D_mean 0.54→0.79, digit 27.7%→0.0%, uniq-prefix 29%→100%. Stage B: **0 trainable rows** (the "B done: 0 rows" was real, not plumbing). **Mirror image of nopack:** nopack maxed the verifiability gradient → one verifiable template; this maxed the diversity gradient → infinite unverifiable variety. Same law: the term that still pays gets maximized, the rest dies. ⇒ Binary gates need a warm start whose gate-pass rate is ≥~10% (v4/v5/v6 questioners qualify; base does not), or dense graded terms.
+
+**Lagrangian arm: NEVER RAN** (Unity 61542272 cancelled in queue at 0s, Jul 8). Fully implemented and ready: `unity:$D/v5_lagrangian.sbatch` + `R-Zero/examples/reward_function/caller_penalty_v5_verl08.py` (V5_REWARD_MODE=lagrangian, r=0.5·D+1.0·(v·b)+λ_v·v+λ_b·b, duals η=0.05 pinning v*=b*=0.6, **V5_EMB_SOURCE=program** — program-embedding diversity implemented). If relaunched: warm-start from v5/v6 questioner, not base.
+
+---
+
 ## 2026-07-09 — ROUND 3 (v5, WashU): in-band 21.8% (~doubled), trainable 19.4%; DIGIT RATCHET TRIPPED (48% of survivors) → v6 target needs a composition cap. WashU = new instant-access compute lane.
 
 **Context:** Unity's 14-day hold was cancelled Jul 7 by the PC session (chasing a 4-GPU-bindable node; replacement `dylan-4a100-v2` 61530885 still PENDING; sftq_v5 retry 61576638 PENDING) → zero GPU access. Discovered **WashU ENGR `general-gpu` partition: 16× A100-SXM4-80GB (4 nodes), 2 nodes idle, INSTANT allocation** (submit with `-A engr-lab-jiaxinh`; login `ssh washu`, user jiaxinh — Jiaxin's lab account, give him a heads-up before long occupancy). June staging survived on node-local `/scratch/jiaxinh` of **a100s-2305**: env `envs/rzero` (torch 2.11/vllm 0.23/transformers 5.12.1) + 8.8G HF cache. 7-day walltime (21 on `general-gpu-long`).
