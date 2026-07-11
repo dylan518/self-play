@@ -4,6 +4,31 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-10 — ROUND 4 + ABLATION + BASE CONTROL (all on WashU): loop compounds 4th round (trainable 23.5%); recipe confound quantified (~1/3 data, ~2/3 recipe); base questioner finally measured (verify 57.5% = the SFT loop's real value-add); digit cap RETIRED per DPW; Lagrangian+pmap reward validated offline (replay + frozen update-sim), live 1-GPU smoke fighting memory.
+
+**Three overnight runs (jobs 97152 6h52m, 97172 1h37m, 97196 2h19m, all a100s-2305):**
+| | base ctl (no SFT) | ablation (v5 data × v4 recipe) | r3 (v5) | r4 (v6 capped) |
+|---|---|---|---|---|
+| in-band | 20.3% | 15.9% | 21.8% | **25.7%** |
+| consensus\|ib | **57.5%** | 83.7% | 89.1% | **91.4%** |
+| trainable | 11.7% | 13.3% | 19.4% | **23.5%** (1,480 @≥7/10) |
+| digit(surv) | 50.4% | 49.3% | 48.2% | 38.9% |
+
+**Findings:** (1) 4th straight compounding round, r3→r4 confound-free (recipe frozen 3ep/1e-5). (2) **Recipe confound quantified**: v5-data×v4-recipe → 15.9% (not 21.8%) ⇒ r3's jump ≈ +3pp pool, +6pp recipe; data compounding real but modest (12.7→15.9 matched-recipe). (3) **Base questioner under modern pipeline: in-band 20.3% but verify only 57.5%** — the "diverse end is dirty" reproduced at K=10; SFT loop's value = checkability-at-difficulty (2× trainable). (4) **Digit enrichment is the PIPELINE's doing, not SFT lineage**: base survivors 50.4% digit > v6's 38.9% — verify filter selects digit; lineage dilutes it. (5) **Digit cap RETIRED (DPW)**: surface regex ≠ diversity (ablation: 99.8% unique yet 41.6% digit); replaced by embedding mechanisms.
+
+**Stationary diversity metric (DPW design: 50 uniform draws, mean 1−cos, frozen Gemma, matched n):** base 0.197/0.196 (within/vs-base) · gated-GRPO step1→20: 0.198→**0.288** within, 0.197→**0.301** drift (flight quantified) · **r1/r2/r3 survivors: 0.194/0.181/0.198 within, drift FLAT 0.219→0.218→0.217** ⇒ SFT loop diversity-stable across rounds in constant units. Standing per-round check now.
+
+**Lagrangian reward finalized (DPW: bounded verifiability + hinged crowding penalty, P_MAP form):** `caller_penalty_v5.py` patched (WashU tree, backup .bak_pmap): `V5L_V_MODE=sat` (v = min(votes/7,1) — 10/10 pays same as 7/10) + `V5_D_MODE=pmap` (D = −(½[max_sim−t_max]₊ + ½[mean_sim−t_mean]₊) vs golden-seeded rolling bank; zero below thresholds = no flight incentive). Thresholds MUST be calibrated per-embedder (reward uses MiniLM: p90 = 0.778/0.398; Gemma runs ~0.1 hotter: 0.926/0.808).
+- **Offline replay (473 real base gens w/ real n=9+K=10):** gold-zone reward +2.22 vs batch +0.12; variance 61% λ_v·v / 23% λ_b·b / 19% joint / 2% pmap — inverse of the gated arm's profile.
+- **Frozen update-sim (CPU, 15 bootstrap GRPO steps, groups of 4):** advantage ordering GOLD +1.7σ > verified-offband +1.5 > partial +0.6 > unverifiable −0.5, stable; duals flip unverifiable-novel from +0.03→−0.46 by step 5; dead groups 8/60 (gated: 59/60). Reward design validated at ~zero cost.
+- **Live 1-GPU smoke NOT yet through** (f.qiao holds 3/4 GPUs on 2305; 97889 trainer-OOM at SVC 0.18/roll 0.20, 97893 service-KV-starve at 0.12, 97894 trying 0.15/0.15 + batch 24×4). Fallback if it fails: service-only live test of compute_score; real step when 4 GPUs free.
+
+**GRPO zero-signal groups (DPW asked):** groups with uniform reward get advantage 0 — kept, not dropped; other terms with within-group variance still train. Rule recorded: *whatever component has within-group variance is what's being trained* — check per step.
+
+**Pending:** [ ] 97894 smoke → then 20-step unison-Lagrangian arm from v6 (solver rejection-SFT alternation, frozen yardstick per macro-cycle) [ ] v7 target = no digit cap, dedup only (embedding density-weighting designed, on hold pending r4-pool near-dup rate) [ ] solver GRPO/STaR on the ~1,700-survivor gold pool (DPW asked; Stage-C machinery ready) [ ] eff-skills judge on r4 survivors [ ] backup r4/ablation/basectl artifacts off node-local scratch
+
+---
+
 ## 2026-07-09 — GATED-GRPO ARM AUTOPSY (PC session's v5_grpo_full, Unity 61531832, ran Jul 8; result was only in the sbatch header, recording here): INVERSE-nopack collapse — gate starved (0.9% fire rate from BASE start), diversity term became the only live gradient → policy dissolved into maximally-novel UNVERIFIABLE soup.
 
 Reward = 1{band[0.3,0.8] ∧ votes≥7/10} + 0.5·D (program-embedding novelty, floor 0.5), 20 GRPO steps from **base** (not v4 — hence gate ~1% not ~11%; the divclip starvation precedent reproduced). Per-step (from `unity:$D/v5_grpo/artifacts/*/v5_batches.md`): gate 0.9%→0.0%, votes≥7 16.8%→0.9%, **votes=0 59%→96%**, D_mean 0.54→0.79, digit 27.7%→0.0%, uniq-prefix 29%→100%. Stage B: **0 trainable rows** (the "B done: 0 rows" was real, not plumbing). **Mirror image of nopack:** nopack maxed the verifiability gradient → one verifiable template; this maxed the diversity gradient → infinite unverifiable variety. Same law: the term that still pays gets maximized, the rest dies. ⇒ Binary gates need a warm start whose gate-pass rate is ≥~10% (v4/v5/v6 questioners qualify; base does not), or dense graded terms.
