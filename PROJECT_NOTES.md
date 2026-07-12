@@ -4,6 +4,18 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-12 — 1-step verl smoke PASSED (Unity) → 20-STEP LAGRANGIAN ARM LAUNCHED (61733092, warm-start v6, frozen-base-solver band). WashU NCCL verdict: node-2307-specific (2308 passes clean); 2307 drained by our failed kill — needs admin undrain via Jiaxin.
+
+**Smoke (Unity 61730200, umd-cscdr-gpu002, COLOCATE=1, Q_STEPS=1):** trained + saved global_step_1 under the Lagrangian+pmap reward. Live batch (n=234): gate 1.3%, mean_v 0.245, mean_b 0.009, duals updated+persisted through verl's ray reward worker (λ_v→0.018, λ_b→0.030), D_mean −0.04 (hinge silent except true crowding: 0.90-sim clone → −0.14), prog-emb coverage 45%. MiniLM p90 calibration deterministic across 3 envs (0.778/0.398). Known nuance: batch-1 duals are 0 → step-1 gradient ≈ pmap-only (update-sim predicted; benign at lr 1e-6).
+
+**LAUNCHED: 20-step arm** `unity:$D/unity_lagr20.sbatch` → job 61733092 (14h, 4×A100). Config: warm-start **v6** (retrained on-cluster from golden_set_v6, deterministic seed-42; ckpt `$D/ckpts/sftq_v6u`), reward μ·(v·b)+λ_v·v+λ_b·b−0.5·pmap, v sat@7/10, duals η=0.05 targets 0.6/0.6 persisted all 20 steps, bank seeded w/ v6 pool, KL 0.05 (verl ref = init = v6, i.e. KL-to-v6 not raw base — v6 IS distilled base), **SOLVER_MODEL=frozen base** → training band == frozen yardstick (no ruler drift; cleanest A/B vs SFT rounds). Ends with Stage B 2000×4 = pipeline-real funnel row to place against r1–r4 (10.0/12.7/21.8/25.7% in-band). **Solver-unison variant = next build** (STaR alternation; deferred to match solver prompt/extraction conventions carefully — DPW wants it: repeated questions self-deflate as solver learns).
+
+**WashU NCCL:** flexible diag (98796, ran on 2308) passed BOTH default and P2P-off → multi-GPU fine on healthy nodes; the 30-min first-broadcast hang was **a100s-2307 being sick** (wedged fabric; same node then failed Slurm kill → auto-drained `Kill task failed (JobId=97947)`). ACTION: ask Jiaxin to email support@seas.wustl.edu to undrain 2307. WashU remains: 1-GPU + shard-parallel (Stage B) anytime; multi-GPU verl OK on healthy nodes when free (2308/2305 currently occupied).
+
+**Pending:** [ ] lagr20 result → A/B table (watch LAG lines: duals trajectory, gate_rate, D_mean; collapse tripwires = unique-prefix + the stationary 50-draw metric on its Stage-B output) [ ] solver-unison driver build (STaR: K=8 samples/survivor, keep answer==label, solver SFT 2ep; alternate every ~3 Q-steps; needs solver-prompt/extraction convention match) [ ] v7 SFT target from r4 pool (dedup only, NO digit cap) [ ] Jiaxin: 2307 undrain heads-up [ ] backup v6r4/basectl/ablation artifacts off 2305 scratch
+
+---
+
 ## 2026-07-10 — ROUND 4 + ABLATION + BASE CONTROL (all on WashU): loop compounds 4th round (trainable 23.5%); recipe confound quantified (~1/3 data, ~2/3 recipe); base questioner finally measured (verify 57.5% = the SFT loop's real value-add); digit cap RETIRED per DPW; Lagrangian+pmap reward validated offline (replay + frozen update-sim), live 1-GPU smoke fighting memory.
 
 **Three overnight runs (jobs 97152 6h52m, 97172 1h37m, 97196 2h19m, all a100s-2305):**
