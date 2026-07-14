@@ -4,6 +4,61 @@ Running log of experiments, findings, and decisions. Newest entries first.
 
 ---
 
+## 2026-07-14 (late) — WashU home-quota incident killed both unison runs; root cause = upstream debug write; fixed + relaunched
+
+- **Symptom**: RewardLoopWorker `OSError: [Errno 122] Disk quota exceeded` on 100404 (2-GPU, cycle 1) ; 100422 (4-GPU) died in startup. Both FAILED.
+- **Root cause**: `caller_penalty.py` (upstream R-Zero) had a debug leftover — `open('test.json','w'); json.dump(predicts)` on EVERY reward call, written to CWD; verl Stage A runs from `cd $HOME`; WashU home = 30GB shared-lab quota that hit 100% (17GB is another student's dir — untouchable). Unity never surfaced it (1TB work dir). All intended writes were already on /scratch (TBs).
+- **Fixes**: (1) debug line REMOVED from caller_penalty.py on BOTH clusters; (2) freed our home files: pip cache 1.7GB purge + selfplay_backup_20260630.tar.gz deleted after pulling to `~/Desktop/agentic_run_artifacts/washu_home_backup/`; (3) relaunched as race 100627 (4-GPU, 2306+env-build block) vs 100628 (2-GPU, 2305), first-to-cycle-1 wins.
+- **Also fixed en route**: 4-GPU env-build sbatch first attempt had unquoted-heredoc bug ($SC expanded empty on login node) — rebuilt locally with Write+scp (lesson: never patch remote files via unquoted heredocs with $vars).
+- Rule going forward on WashU: treat HOME as ~read-only (30GB shared); logs are OK (KBs), everything else scratch.
+
+## 2026-07-14 — CONTINUOUS UNISON LOOP v1 built + launched (unison1, Unity 61806010); rollout-text leaks fixed everywhere
+
+**The setup (user-confirmed batching rules):** alternate questioner GRPO chunks (3 steps/cycle, pmap_wb reward from pmapwb1) with SOLVER replay-GRPO updates trained ONLY on harvested Stage-A verify-service rollouts — zero extra rollout compute. Key insight: while the solver is frozen, every Q-step's rollouts remain exactly on-policy for it → accumulate across Q-chunks; ONE solver step at >=96 live groups (live = verified votes>=2 AND 0<hits<n, i.e. within-group variance); FLUSH buffer after each solver step (older rollouts off-policy once solver moves); non-divisible counts fine (full-batch grad accumulation over sequence micro-batches — divisibility is a verl artifact, remainder carried, nothing dropped). Band recomputes vs the UPDATED solver each cycle → repeated questions self-deflate out of band.
+
+**Rollout-text leaks fixed (user: "dont throw away that stuff"):**
+- `start_vllm_server.py` (.bak_harvest, Unity): process_single now carries sol_texts; consensus loop records verified_answer per item; HARVEST_DIR (env-gated) appends per-question {question, sol_texts, sol_answers, verified_answer, votes, score, score_cv} to solver_harvest.jsonl; texts stripped from caller payload.
+- `evaluate.py` (.bak_savetext, Unity+WashU): saves solution_texts in results entries.
+- `upload.py` (.bak_savetext, Unity+WashU): archives *_results.json to raw_results/ instead of deleting (it was silently destroying every Stage-B solution set; pmapwb1 shards 0/1/3 lost this way, shard 2 saved by a lucky 2-min-early scp).
+
+**New files:** `unity:$D/solver_replay_grpo.py` (replay-GRPO: groups from harvest, A_i=r_i−mean(r), one full-batch AdamW step lr 1e-6 via micro=4 accumulation, grad-ckpt, exit 3 = keep accumulating; group-selection logic unit-tested on synthetic harvest), `unity:$D/unity_unison1.sbatch` (6 cycles, MIN_LIVE=96, NUM_SAMPLES=50/gpu per-cycle Stage-B yardstick, both models start from Qwen3.5-4B base).
+
+**v1 limitations (flagged):** per-cycle external evals (MATH-500/Oly) not in-loop — run brackets on final solver after; Q-chunk warm-starts reset Adam/KL-ref each cycle; Stage-B texts (now saved) not yet folded into buffer (Stage-A harvest only).
+
+### Pending
+- [ ] unison1: verify cycle-1 harvest jsonl appears + live-group counts reasonable; watch SOLVER_STEP/WAIT cadence
+- [ ] Final solver brackets (MATH-500 + OlympiadBench, format/acc split) vs base after run
+- [ ] Mirror start_vllm_server harvest patch to WashU before any WashU run
+- [ ] pmapwb1-verified-100 vs golden_set_v6 cross-set similarity (job 61805773 XSET — collect results)
+## 2026-07-13/14 — pmapwb1: iter1 reward + within-batch pmap, 1 Q-step VALIDATED LIVE; gold-set difficulty probe (Together); compaction-cancel incident
+
+### pmapwb1 (Unity 61801653, 4xA100 gpu017, 1h34m, rc=0) — the "fix diversity only" arm
+- **Design (user-specified)**: iter1 recipe byte-for-byte (`caller_penalty.py`, r = uncertainty + 0.75·verified(K=3, MIN_AGREE=2) + 0.5·D, base init, uncertainty difficulty, NO Lagrangian/duals/band-gate) with ONLY D swapped: Vendi → **within-batch hinged pmap** per the Desktop rescoring (`iter1_step1_by_reward.md`, `calibrate_golden_within_batch.py`): Gemma question-text embeddings, nn/mean vs other Qs in batch, thresholds = golden pairwise means. Q_STEPS=1, COLOCATE 4-GPU speedups.
+- **Patch**: `unity:R-Zero/examples/reward_function/caller_penalty.py` (backup `.bak_pmapwb`) — `DIVERSITY_MODE=pmap_wb` branch; knobs `PMAP_TMAX/PMAP_TMEAN/DIVERSITY_WEIGHT`. CPU-tested on planted clones before launch (clones 0.5D −0.18…−0.23, distinct silent). Launch calibration (unsloth/embeddinggemma-300m, golden_set_v5): **T_max=0.9101 T_mean=0.7971** (Desktop analysis: 0.9082/0.7898 — same method, matches).
+- **Live step-1 batch (n=230)**: penalized 175/230, mean_D=−0.121 (offline rescoring said 157/236, −0.089 — same regime). mean_verified=−0.62, inband=0.22. Reward ordering correct: novel verified 3/3 top (+1.15); votes=0 digit clones bottom (−0.97, with extra −0.22…−0.25 crowding).
+- **Funnel post-step**: 994 generated → 138 in band 0.3–0.8 → **100 judge-verified rows (72% of banded)**.
+- **One-step effect**: digit-mention 38%→28% (raw dist), prefix90-uniq 82%→78%, in-band 22%→20%. Verified-100 digit share 48% — the verify filter re-enriches digits (same effect as r4/base-ctl 50.4%/38.9%): pmap moves the raw distribution, the checkability filter pulls it back. Report + 30-sample: `~/Desktop/r-zero/pmapwb1_step1_report.md`. sbatch: `unity:$D/unity_pmapwb1.sbatch`.
+- lagr1 (61791891, v6-warm 1-step Lagrangian rerun): Stage A done (step-1 ckpt + reward batches saved to `$D/logs/lagr1_batches.md`/`lagr1_duals.json`); Stage B cancelled by user to free GPUs for pmapwb1.
+
+### Infra fixes/incidents
+- **Compaction-cancel incident**: Jul 12 jobs 61747323 (lagr1) + 61746717 (gen 768/1000) were `CANCELLED by 6025` = OUR uid, at the minute context-compaction killed the session's background watchers. Lesson: monitors/waiters must not hold job lifetimes; treat "job vanished + our-uid cancel" as harness artifact, not cluster.
+- **`evaluate.py` deletes its input questions on load** (`os.remove(INPUT_FILE)` line 67) and buffers ALL results to the end → mid-run inspection impossible; killing eval mid-run LOSES the questions. Patched (backup `.bak_chunk`): keep input file + chunked generate+grade with `*_results.json.partial` every `EVAL_CHUNK_QUESTIONS` (default 50). Pure batching, no knob changes.
+- **vLLM gen script spawn footgun**: `VLLM_WORKER_MULTIPROC_METHOD=spawn` requires `if __name__=="__main__"` guard (first gen_s1 attempt died at engine init re-import). Fixed `unity:$D/gen_lagr_step1_vllm.py`. vLLM 1k-question probe: 5 min vs 25 min HF generate (job 61793136: 966/1000 parseable, 84% prefix90-uniq, digit 25.6% — step-1-from-base ckpt, delivered `~/Desktop/r-zero/lagr_step1_1k_sample.md`).
+- **Unity login node OOM-kills Gemma embedding** (~400 texts) — run crowding calcs as `-p cpu` sbatch (crowd job 61805243), not on login.
+
+### Gold-set difficulty probe (self-play-v3 43 Claude-written V(s)->bool problems, Qwen3.5-9B on Together, n=9 direct + n=9 code, temp 1.0, 32k budget)
+- Harness `tools/gold_set_together_eval.py` (UA header needed — Cloudflare 1010-blocks urllib; 1000-worker burst → 561× 429s, fixed by --retry mode at 40→15 workers with Retry-After backoff; 0 API errors final).
+- **Final buckets (best-of-mode pass@9)**: too easy >0.8: **16** | in-band 0.3–0.8: **13** | hard tail <0.3: **8** | unsolved 0/18: **6** (molecule_design, sumofsquares proof, lean transitivity, 4bit ALU, bio seq-align, lean arith_double). direct 198/387 > code 166/387. 9% samples truncated at 32k thinking.
+- Read: well-spread for 9B; our 4B shifts left — est. ~20/43 in-band for 4B, rest hard. Lean/bio library-grounded checks = the hard core (real kernel rejections, not formatting). Report `~/Desktop/gold_set/together_eval_report.md`, samples jsonl alongside.
+
+### Pending
+- [x] Crowding before/after (job 61805243): penalized 76%->71%, mean_D -0.125->-0.100, p10 -0.322->-0.278 — modest de-crowding in 1 step, appended to Desktop report
+- [ ] Decide: pmapwb multi-step arm (6 steps, iter1-matched) now that 1-step validated
+- [ ] lagr1 Stage-B rerun if v6-warm funnel numbers still wanted
+- [ ] Fix challenger_batches.md literal \n in pmap header line (cosmetic) before next multi-step run
+- [ ] Gold set: 4B-on-vLLM rerun for true difficulty read (harness supports GOLD_MODEL env)
+- [ ] Jiaxin heads-ups: WashU 2307 undrain + sustained use
+
 ## 2026-07-12 — 1-step verl smoke PASSED (Unity) → 20-STEP LAGRANGIAN ARM LAUNCHED (61733092, warm-start v6, frozen-base-solver band). WashU NCCL verdict: node-2307-specific (2308 passes clean); 2307 drained by our failed kill — needs admin undrain via Jiaxin.
 
 **Smoke (Unity 61730200, umd-cscdr-gpu002, COLOCATE=1, Q_STEPS=1):** trained + saved global_step_1 under the Lagrangian+pmap reward. Live batch (n=234): gate 1.3%, mean_v 0.245, mean_b 0.009, duals updated+persisted through verl's ray reward worker (λ_v→0.018, λ_b→0.030), D_mean −0.04 (hinge silent except true crowding: 0.90-sim clone → −0.14), prog-emb coverage 45%. MiniLM p90 calibration deterministic across 3 envs (0.778/0.398). Known nuance: batch-1 duals are 0 → step-1 gradient ≈ pmap-only (update-sim predicted; benign at lr 1e-6).
